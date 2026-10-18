@@ -1,0 +1,1288 @@
+From a0e42c5e278eb32dc0367a5b21d6fa92b1f08da5 Mon Sep 17 00:00:00 2001
+From: Yves <calibratedbeats@gmail.com>
+Date: Sun, 18 Oct 2026 19:30:54 +0800
+Subject: [PATCH 1/3] Add opt-in MSP bench sessions and motor command watchdog
+
+---
+ mk/source.mk                              |   1 +
+ src/main/fc/betabench.c                   | 112 ++++++++++++++++++++++
+ src/main/fc/betabench.h                   |  10 ++
+ src/main/fc/betabench_state.h             |  28 ++++++
+ src/main/fc/init.c                        |   7 ++
+ src/main/fc/tasks.c                       |   6 ++
+ src/main/msp/msp.c                        |  14 +++
+ src/main/msp/msp_protocol_v2_betaflight.h |  10 ++
+ 8 files changed, 188 insertions(+)
+ create mode 100644 src/main/fc/betabench.c
+ create mode 100644 src/main/fc/betabench.h
+ create mode 100644 src/main/fc/betabench_state.h
+
+diff --git a/mk/source.mk b/mk/source.mk
+index 6fd2fd265..06caeef93 100644
+--- a/mk/source.mk
++++ b/mk/source.mk
+@@ -55,6 +55,7 @@ PG_SRC = \
+             pg/vtx_table.c
+ 
+ COMMON_SRC = \
++            fc/betabench.c \
+             build/build_config.c \
+             build/debug.c \
+             build/version.c \
+diff --git a/src/main/fc/betabench.c b/src/main/fc/betabench.c
+new file mode 100644
+index 000000000..821727909
+--- /dev/null
++++ b/src/main/fc/betabench.c
+@@ -0,0 +1,112 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++#include "platform.h"
++#ifdef USE_BETABENCH
++#include "common/streambuf.h"
++#include "config/feature.h"
++#include "drivers/motor.h"
++#include "drivers/time.h"
++#include "fc/runtime_config.h"
++#include "fc/betabench.h"
++#include "fc/betabench_state.h"
++#include "flight/mixer.h"
++#include "msp/msp_protocol_v2_betaflight.h"
++#include "sensors/battery.h"
++
++static benchState_t state;
++static mspDescriptor_t sessionOwner;
++static uint32_t generation;
++
++static void stopOutputs(void)
++{
++    for (unsigned i = 0; i < getMotorCount(); i++) {
++        motor_disarmed[i] = motorConvertFromExternal(1000);
++    }
++    state.active = false;
++    state.session = 0;
++}
++
++void betabenchInit(void)
++{
++}
++
++bool betabenchLocked(void) { return state.latched; }
++
++void betabenchUpdate(void)
++{
++    if (state.latched) {
++        // Leave inhibition latched after Stop/timeout until power cycling.
++        // This prevents delayed legacy writes or arming-enable messages from
++        // restarting a test. A fresh BENCH_BEGIN can start another session.
++        setArmingDisabled(ARMING_DISABLED_MSP);
++        if (benchExpired(&state, millis()) || ARMING_FLAG(ARMED)) {
++            stopOutputs();
++        }
++    }
++}
++
++mspResult_e betabenchProcess(mspDescriptor_t owner, int16_t command, sbuf_t *src, sbuf_t *dst)
++{
++    const unsigned length = sbufBytesRemaining(src);
++    betabenchUpdate();
++    switch (command) {
++    case MSP2_BENCH_CAPABILITIES:
++        if (length) { return MSP_RESULT_ERROR; }
++        sbufWriteU8(dst, 1);
++        sbufWriteU8(dst, 1);
++        sbufWriteU8(dst, getMotorCount());
++        sbufWriteU16(dst, BETABENCH_TIMEOUT_MS);
++        break;
++    case MSP2_BENCH_BEGIN:
++        if (length || state.active || ARMING_FLAG(ARMED) || !motorIsEnabled() || !isMotorProtocolDshot() || featureIsEnabled(FEATURE_3D)) { return MSP_RESULT_ERROR; }
++        stopOutputs();
++        state.latched = true;
++        state.active = true;
++        state.session = ++generation;
++        if (!state.session) { state.session = ++generation; }
++        state.sequence = 0;
++        state.lastCommandMs = millis();
++        sessionOwner = owner;
++        setArmingDisabled(ARMING_DISABLED_MSP);
++        sbufWriteU32(dst, state.session);
++        break;
++    case MSP2_BENCH_SET_MOTORS: {
++        const unsigned count = getMotorCount();
++        if (length != 9 + count * 2 || owner != sessionOwner || ARMING_FLAG(ARMED)) { return MSP_RESULT_ERROR; }
++        const uint32_t session = sbufReadU32(src);
++        const uint32_t sequence = sbufReadU32(src);
++        if (sbufReadU8(src) != count) { return MSP_RESULT_ERROR; }
++        uint16_t outputs[MAX_SUPPORTED_MOTORS];
++        for (unsigned i = 0; i < count; i++) {
++            outputs[i] = sbufReadU16(src);
++            if (outputs[i] < 1000 || outputs[i] > 2000) { return MSP_RESULT_ERROR; }
++        }
++        if (!benchAccept(&state, session, sequence, millis())) { return MSP_RESULT_ERROR; }
++        for (unsigned i = 0; i < count; i++) {
++            motor_disarmed[i] = motorConvertFromExternal(outputs[i]);
++        }
++        break;
++    }
++    case MSP2_BENCH_STOP:
++        if (length || ARMING_FLAG(ARMED)) { return MSP_RESULT_ERROR; }
++        stopOutputs();
++        break;
++    case MSP2_BENCH_SAMPLE:
++        if (length) { return MSP_RESULT_ERROR; }
++        sbufWriteU8(dst, 1);
++        sbufWriteU8(dst, state.active ? 1 : state.latched ? 2 : 0);
++        sbufWriteU32(dst, state.session);
++        sbufWriteU32(dst, micros());
++        sbufWriteU16(dst, getBatteryVoltage());
++        sbufWriteU16(dst, (int16_t)getAmperage());
++        sbufWriteU8(dst, getMotorCount());
++        for (unsigned i = 0; i < getMotorCount(); i++) {
++            sbufWriteU16(dst, motorConvertToExternal(motor_disarmed[i]));
++        }
++        sbufFill(dst, 0, 25);
++        break;
++    default:
++        return MSP_RESULT_CMD_UNKNOWN;
++    }
++    return MSP_RESULT_ACK;
++}
++#endif
+diff --git a/src/main/fc/betabench.h b/src/main/fc/betabench.h
+new file mode 100644
+index 000000000..517f97e18
+--- /dev/null
++++ b/src/main/fc/betabench.h
+@@ -0,0 +1,10 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++#pragma once
++#include <stdbool.h>
++#include <stdint.h>
++#include "msp/msp.h"
++
++void betabenchInit(void);
++void betabenchUpdate(void);
++bool betabenchLocked(void);
++mspResult_e betabenchProcess(mspDescriptor_t owner, int16_t command, sbuf_t *src, sbuf_t *dst);
+diff --git a/src/main/fc/betabench_state.h b/src/main/fc/betabench_state.h
+new file mode 100644
+index 000000000..8ef05721a
+--- /dev/null
++++ b/src/main/fc/betabench_state.h
+@@ -0,0 +1,28 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++#pragma once
++#include <stdbool.h>
++#include <stdint.h>
++
++#define BETABENCH_TIMEOUT_MS 500
++typedef struct benchState_s {
++    uint32_t session;
++    uint32_t sequence;
++    uint32_t lastCommandMs;
++    bool active;
++    bool latched;
++} benchState_t;
++
++static inline bool benchExpired(const benchState_t *s, uint32_t now)
++{
++    return s->active && (uint32_t)(now - s->lastCommandMs) >= BETABENCH_TIMEOUT_MS;
++}
++
++static inline bool benchAccept(benchState_t *s, uint32_t session, uint32_t sequence, uint32_t now)
++{
++    if (!s->active || s->session != session || (int32_t)(sequence - s->sequence) <= 0 || benchExpired(s, now)) {
++        return false;
++    }
++    s->sequence = sequence;
++    s->lastCommandMs = now;
++    return true;
++}
+diff --git a/src/main/fc/init.c b/src/main/fc/init.c
+index 190d484e0..48dae2342 100644
+--- a/src/main/fc/init.c
++++ b/src/main/fc/init.c
+@@ -159,6 +159,9 @@
+ #include "pg/mco.h"
+ #include "pg/motor.h"
+ #include "pg/pinio.h"
++#ifdef USE_BETABENCH
++#include "fc/betabench.h"
++#endif
+ #include "pg/piniobox.h"
+ #include "pg/pin_pull_up_down.h"
+ #include "pg/pg.h"
+@@ -1076,6 +1079,10 @@ void initPhase3(void)
+ 
+     debugInit();
+ 
++#ifdef USE_BETABENCH
++    betabenchInit();
++#endif
++
+ #if ENABLE_UNUSED_PINS_INIT
+     unusedPinsInit();
+ #endif
+diff --git a/src/main/fc/tasks.c b/src/main/fc/tasks.c
+index dfc46d36e..0b24ef69d 100644
+--- a/src/main/fc/tasks.c
++++ b/src/main/fc/tasks.c
+@@ -116,6 +116,9 @@
+ #endif
+ 
+ #include "tasks.h"
++#ifdef USE_BETABENCH
++#include "fc/betabench.h"
++#endif
+ 
+ // taskUpdateRxMain() has occasional peaks in execution time so normal moving average duration estimation doesn't work
+ // Decay the estimated max task duration by 1/(1 << RX_TASK_DECAY_SHIFT) on every invocation
+@@ -125,6 +128,9 @@
+ 
+ static void taskMain(timeUs_t currentTimeUs)
+ {
++#ifdef USE_BETABENCH
++    betabenchUpdate();
++#endif
+     UNUSED(currentTimeUs);
+ 
+ #ifdef USE_SDCARD
+diff --git a/src/main/msp/msp.c b/src/main/msp/msp.c
+index 86a5f4656..fb73997bd 100644
+--- a/src/main/msp/msp.c
++++ b/src/main/msp/msp.c
+@@ -27,6 +27,9 @@
+ #include <ctype.h>
+ 
+ #include "platform.h"
++#ifdef USE_BETABENCH
++#include "fc/betabench.h"
++#endif
+ 
+ #include "blackbox/blackbox.h"
+ #include "blackbox/blackbox_io.h"
+@@ -3130,6 +3133,9 @@ RAM_CODE static mspResult_e mspProcessInCommand(mspDescriptor_t srcDesc, int16_t
+ #endif
+ 
+     case MSP_SET_MOTOR:
++#ifdef USE_BETABENCH
++        if (betabenchLocked()) { return MSP_RESULT_ERROR; }
++#endif
+         if (dataSize < getMotorCount() * sizeof(uint16_t)) {
+             return MSP_RESULT_ERROR;
+         }
+@@ -3897,6 +3903,9 @@ RAM_CODE static mspResult_e mspProcessInCommand(mspDescriptor_t srcDesc, int16_t
+ 
+     case MSP_SET_ARMING_DISABLED:
+         {
++#ifdef USE_BETABENCH
++            if (betabenchLocked() && dataSize && *sbufPtr(src) == 0) { return MSP_RESULT_ERROR; }
++#endif
+             const uint8_t command = sbufReadU8(src);
+             uint8_t disableRunawayTakeoff = 0;
+ #ifndef USE_RUNAWAY_TAKEOFF
+@@ -4776,6 +4785,11 @@ RAM_CODE mspResult_e mspFcProcessCommand(mspDescriptor_t srcDesc, mspPacket_t *c
+     // initialize reply by default
+     reply->cmd = cmd->cmd;
+ 
++#ifdef USE_BETABENCH
++    if (cmdMSP >= MSP2_BENCH_CAPABILITIES && cmdMSP <= MSP2_HX711_SAVE_CALIBRATION) {
++        ret = betabenchProcess(srcDesc, cmdMSP, src, dst);
++    } else
++#endif
+     if (mspCommonProcessOutCommand(cmdMSP, dst, mspPostProcessFn)) {
+         ret = MSP_RESULT_ACK;
+     } else if (mspProcessOutCommand(srcDesc, cmdMSP, dst)) {
+diff --git a/src/main/msp/msp_protocol_v2_betaflight.h b/src/main/msp/msp_protocol_v2_betaflight.h
+index 7ed9dd273..5cb62fba3 100644
+--- a/src/main/msp/msp_protocol_v2_betaflight.h
++++ b/src/main/msp/msp_protocol_v2_betaflight.h
+@@ -48,3 +48,13 @@
+ #define CUSTOM_MSG_MAX_NUM                       4
+ #define MSP2TEXT_BATTERY_PROFILE_NAME        11
+ // next new variable type must be >= MSP2TEXT_BATTERY_PROFILE_NAME + 1 (12)
++
++// Betabench project-local extension. Wire version 1; see docs/development/Betabench.md.
++#define MSP2_BENCH_CAPABILITIES          0x30F0
++#define MSP2_BENCH_BEGIN                 0x30F1
++#define MSP2_BENCH_SET_MOTORS            0x30F2
++#define MSP2_BENCH_STOP                  0x30F3
++#define MSP2_BENCH_SAMPLE                0x30F4
++#define MSP2_HX711_TARE                  0x30F5
++#define MSP2_HX711_CALIBRATE             0x30F6
++#define MSP2_HX711_SAVE_CALIBRATION      0x30F7
+-- 
+2.55.0.windows.3
+
+
+From b821aed4429f2e6d0199fd1752c61085631102ba Mon Sep 17 00:00:00 2001
+From: Yves <calibratedbeats@gmail.com>
+Date: Sun, 18 Oct 2026 19:31:43 +0800
+Subject: [PATCH 2/3] Add optional HX711 resources, sampling and saved
+ calibration
+
+---
+ mk/source.mk                  |   2 +
+ src/main/cli/cli.c            |   7 ++
+ src/main/drivers/hx711.c      | 152 ++++++++++++++++++++++++++++++++++
+ src/main/drivers/hx711.h      |  19 +++++
+ src/main/drivers/hx711_math.h |  30 +++++++
+ src/main/drivers/resource.c   |   2 +
+ src/main/drivers/resource.h   |   2 +
+ src/main/fc/betabench.c       |  37 ++++++++-
+ src/main/fc/tasks.c           |   6 ++
+ src/main/pg/hx711.c           |  10 +++
+ src/main/pg/hx711.h           |  12 +++
+ src/main/pg/pg_ids.h          |   1 +
+ src/main/target/common_pre.h  |   5 ++
+ 13 files changed, 284 insertions(+), 1 deletion(-)
+ create mode 100644 src/main/drivers/hx711.c
+ create mode 100644 src/main/drivers/hx711.h
+ create mode 100644 src/main/drivers/hx711_math.h
+ create mode 100644 src/main/pg/hx711.c
+ create mode 100644 src/main/pg/hx711.h
+
+diff --git a/mk/source.mk b/mk/source.mk
+index 06caeef93..58f6d6c7b 100644
+--- a/mk/source.mk
++++ b/mk/source.mk
+@@ -1,4 +1,5 @@
+ PG_SRC = \
++            pg/hx711.c \
+             pg/adc.c \
+             pg/alt_hold_multirotor.c \
+             pg/alt_hold_wing.c \
+@@ -56,6 +57,7 @@ PG_SRC = \
+ 
+ COMMON_SRC = \
+             fc/betabench.c \
++            drivers/hx711.c \
+             build/build_config.c \
+             build/debug.c \
+             build/version.c \
+diff --git a/src/main/cli/cli.c b/src/main/cli/cli.c
+index fb3ac7058..2e6bcf160 100644
+--- a/src/main/cli/cli.c
++++ b/src/main/cli/cli.c
+@@ -76,6 +76,9 @@ bool cliMode = false;
+ #include "drivers/flash/flash.h"
+ #include "drivers/inverter.h"
+ #include "drivers/io.h"
++#ifdef USE_HX711
++#include "pg/hx711.h"
++#endif
+ #include "drivers/io_impl.h"
+ #include "drivers/lcd_console.h"
+ #include "drivers/light_led.h"
+@@ -6706,6 +6709,10 @@ typedef struct {
+     { owner, pgn, sizeof(type), offsetof(type, member), max }
+ 
+ const cliResourceValue_t resourceTable[] = {
++#ifdef USE_HX711
++    DEFS( OWNER_HX711_SCK, PG_HX711_CONFIG, hx711Config_t, sckTag ),
++    DEFS( OWNER_HX711_DOUT, PG_HX711_CONFIG, hx711Config_t, doutTag ),
++#endif
+ #if defined(USE_BEEPER)
+     DEFS( OWNER_BEEPER,        PG_BEEPER_DEV_CONFIG, beeperDevConfig_t, ioTag ),
+ #endif
+diff --git a/src/main/drivers/hx711.c b/src/main/drivers/hx711.c
+new file mode 100644
+index 000000000..dea832988
+--- /dev/null
++++ b/src/main/drivers/hx711.c
+@@ -0,0 +1,152 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++#include <math.h>
++#include <string.h>
++#include "platform.h"
++#ifdef USE_HX711
++#include "common/streambuf.h"
++#include "config/config.h"
++#include "drivers/io.h"
++#include "drivers/time.h"
++#include "drivers/hx711.h"
++#include "drivers/hx711_math.h"
++#include "pg/hx711.h"
++
++static IO_t sck, dout;
++static bool configured, saturated, failed, saved, tared;
++static int32_t raw;
++static uint32_t sequence, lastSampleMs;
++static struct {
++    bool active;
++    uint32_t startMs, knownMg;
++    unsigned count;
++    float mean, m2;
++} capture;
++
++void hx711Init(void)
++{
++    const hx711Config_t *config = hx711Config();
++    sck = IOGetByTag(config->sckTag);
++    dout = IOGetByTag(config->doutTag);
++    if (!sck || !dout || sck == dout || !IOIsFreeOrPreinit(sck) || !IOIsFreeOrPreinit(dout)) {
++        return;
++    }
++    IOInit(sck, OWNER_HX711_SCK, 0);
++    IOInit(dout, OWNER_HX711_DOUT, 0);
++    IOLo(sck);
++    IOConfigGPIO(sck, IOCFG_OUT_PP);
++    IOConfigGPIO(dout, IOCFG_IPU);
++    configured = true;
++    saved = isfinite(config->countsPerGram) && fabsf(config->countsPerGram) >= 0.0001f;
++    // A calibration stored in flash includes a valid tare.
++    tared = saved;
++}
++
++bool hx711Busy(void) { return capture.active; }
++
++void hx711Update(void)
++{
++    const uint32_t now = millis();
++    if (!configured) {
++        return;
++    }
++    if (!IORead(dout)) {
++        uint32_t bits = 0;
++        for (unsigned i = 0; i < 25; i++) {
++            // Protect only each high pulse. HX711 powers down if SCK is high
++            // for >60us. Interrupts remain enabled during conversion waiting.
++            const uint32_t primask = __get_PRIMASK();
++            __disable_irq();
++            IOHi(sck);
++            delayMicroseconds(1);
++            if (i < 24) {
++                bits = (bits << 1) | (IORead(dout) ? 1 : 0);
++            }
++            IOLo(sck);
++            __set_PRIMASK(primask);
++            delayMicroseconds(1);
++        }
++        raw = hx711SignExtend(bits);
++        saturated = raw == -8388608 || raw == 8388607;
++        lastSampleMs = now;
++        sequence++;
++        if (capture.active) {
++            if (saturated) {
++                capture.active = false;
++                failed = true;
++            } else {
++                capture.count++;
++                const float delta = raw - capture.mean;
++                capture.mean += delta / capture.count;
++                capture.m2 += delta * (raw - capture.mean);
++            }
++        }
++    }
++    if (capture.active && (uint32_t)(now - capture.startMs) >= 1000) {
++        capture.active = false;
++        const float variance = capture.count > 1 ? capture.m2 / (capture.count - 1) : 0;
++        failed = capture.count < 8 || (uint32_t)(now - lastSampleMs) > 250 || !hx711Stable(capture.mean, variance, capture.knownMg ? hx711Config()->offset : lrintf(capture.mean));
++        if (!failed) {
++            if (!capture.knownMg) {
++                hx711ConfigMutable()->offset = lrintf(capture.mean);
++                tared = true;
++            } else {
++                float scale;
++                failed = !hx711Scale(capture.mean, variance, hx711Config()->offset, capture.knownMg, &scale);
++                if (!failed) {
++                    hx711ConfigMutable()->countsPerGram = scale;
++                }
++            }
++            if (!failed) {
++                saved = false;
++            }
++        }
++    }
++}
++
++bool hx711Capture(uint32_t knownMg)
++{
++    if (!configured || !sequence || (uint32_t)(millis() - lastSampleMs) > 250 || saturated || capture.active || (knownMg && !tared) || knownMg > 500000000) {
++        return false;
++    }
++    memset(&capture, 0, sizeof(capture));
++    capture.active = true;
++    capture.startMs = millis();
++    capture.knownMg = knownMg;
++    failed = false;
++    return true;
++}
++
++bool hx711Save(void)
++{
++    const hx711Config_t before = *hx711Config();
++    if (!configured || capture.active || failed || !tared || !isfinite(before.countsPerGram) || fabsf(before.countsPerGram) < 0.0001f) {
++        return false;
++    }
++    writeEEPROM();
++    saved = readEEPROM() && hx711Config()->offset == before.offset && hx711Config()->countsPerGram == before.countsPerGram;
++    return saved;
++}
++
++void hx711WriteSample(sbuf_t *dst)
++{
++    const hx711Config_t *config = hx711Config();
++    const uint32_t age = sequence ? (uint32_t)(millis() - lastSampleMs) : UINT32_MAX;
++    const bool calibrated = tared && isfinite(config->countsPerGram) && fabsf(config->countsPerGram) >= 0.0001f;
++    uint8_t flags = (configured ? HX711_CONFIGURED : 0) | (sequence && age <= 250 ? HX711_FRESH : 0) | (calibrated ? HX711_CALIBRATED : 0) | (saturated ? HX711_SATURATED : 0) | (capture.active ? HX711_BUSY : 0) | (failed ? HX711_FAILED : 0) | (saved ? HX711_SAVED : 0);
++    const float mg = calibrated ? ((float)raw - config->offset) * 1000.0f / config->countsPerGram : 0;
++    // Keep invalid or overflowing values out of the signed-milligram field.
++    const int32_t mass = isfinite(mg) && mg > -2147483000.0f && mg < 2147483000.0f ? lrintf(mg) : 0;
++    if (!isfinite(mg) || mg <= -2147483000.0f || mg >= 2147483000.0f) {
++        flags &= ~HX711_CALIBRATED;
++    }
++    sbufWriteU8(dst, flags);
++    sbufWriteU32(dst, raw);
++    sbufWriteU32(dst, mass);
++    sbufWriteU32(dst, sequence);
++    sbufWriteU32(dst, age);
++    sbufWriteU32(dst, config->offset);
++    uint32_t scaleBits;
++    memcpy(&scaleBits, &config->countsPerGram, sizeof(scaleBits));
++    sbufWriteU32(dst, scaleBits);
++}
++#endif
+diff --git a/src/main/drivers/hx711.h b/src/main/drivers/hx711.h
+new file mode 100644
+index 000000000..f4042790f
+--- /dev/null
++++ b/src/main/drivers/hx711.h
+@@ -0,0 +1,19 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++#pragma once
++#include <stdbool.h>
++#include <stdint.h>
++#include "common/streambuf.h"
++
++#define HX711_CONFIGURED 1
++#define HX711_FRESH 2
++#define HX711_CALIBRATED 4
++#define HX711_SATURATED 8
++#define HX711_BUSY 16
++#define HX711_FAILED 32
++#define HX711_SAVED 64
++void hx711Init(void);
++void hx711Update(void);
++bool hx711Capture(uint32_t knownMg);
++bool hx711Save(void);
++bool hx711Busy(void);
++void hx711WriteSample(sbuf_t *dst);
+diff --git a/src/main/drivers/hx711_math.h b/src/main/drivers/hx711_math.h
+new file mode 100644
+index 000000000..9d92bd9b2
+--- /dev/null
++++ b/src/main/drivers/hx711_math.h
+@@ -0,0 +1,30 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++#pragma once
++#include <math.h>
++#include <stdbool.h>
++#include <stdint.h>
++
++static inline int32_t hx711SignExtend(uint32_t raw)
++{
++    return (int32_t)(raw & 0x7fffff) - (int32_t)(raw & 0x800000);
++}
++
++static inline bool hx711Stable(float mean, float variance, int32_t offset)
++{
++    const float limit = fmaxf(50.0f, fabsf(mean - offset) * 0.005f);
++    return isfinite(mean) && isfinite(variance) && variance >= 0 && variance <= limit * limit;
++}
++
++static inline bool hx711Scale(float mean, float variance, int32_t offset, uint32_t knownMg, float *scale)
++{
++    const float delta = mean - offset;
++    if (!knownMg || knownMg > 500000000 || !hx711Stable(mean, variance, offset) || fabsf(delta) <= fmaxf(10.0f, 10.0f * sqrtf(variance))) {
++        return false;
++    }
++    const float result = delta * 1000.0f / knownMg;
++    if (!isfinite(result) || fabsf(result) < 0.0001f) {
++        return false;
++    }
++    *scale = result;
++    return true;
++}
+diff --git a/src/main/drivers/resource.c b/src/main/drivers/resource.c
+index 9fb4200cf..93fe5d0fd 100644
+--- a/src/main/drivers/resource.c
++++ b/src/main/drivers/resource.c
+@@ -124,6 +124,8 @@ static const char * const ownerNames[] = {
+     [OWNER_CAN_TX] = "CAN_TX",
+     [OWNER_CAN_RX] = "CAN_RX",
+     [OWNER_CAN_SILENT] = "CAN_SILENT",
++    [OWNER_HX711_SCK] = "HX711_SCK",
++    [OWNER_HX711_DOUT] = "HX711_DOUT",
+     // Keep in sync with resourceOwner_e.
+ };
+ 
+diff --git a/src/main/drivers/resource.h b/src/main/drivers/resource.h
+index e30e2b536..f86268ef6 100644
+--- a/src/main/drivers/resource.h
++++ b/src/main/drivers/resource.h
+@@ -120,6 +120,8 @@ typedef enum {
+     OWNER_CAN_TX,                // TX must be just before RX
+     OWNER_CAN_RX,
+     OWNER_CAN_SILENT,
++    OWNER_HX711_SCK,
++    OWNER_HX711_DOUT,
+     OWNER_TOTAL_COUNT
+ } resourceOwner_e;
+ 
+diff --git a/src/main/fc/betabench.c b/src/main/fc/betabench.c
+index 821727909..00df28a86 100644
+--- a/src/main/fc/betabench.c
++++ b/src/main/fc/betabench.c
+@@ -11,6 +11,9 @@
+ #include "flight/mixer.h"
+ #include "msp/msp_protocol_v2_betaflight.h"
+ #include "sensors/battery.h"
++#ifdef USE_HX711
++#include "drivers/hx711.h"
++#endif
+ 
+ static benchState_t state;
+ static mspDescriptor_t sessionOwner;
+@@ -27,6 +30,9 @@ static void stopOutputs(void)
+ 
+ void betabenchInit(void)
+ {
++#ifdef USE_HX711
++    hx711Init();
++#endif
+ }
+ 
+ bool betabenchLocked(void) { return state.latched; }
+@@ -52,12 +58,19 @@ mspResult_e betabenchProcess(mspDescriptor_t owner, int16_t command, sbuf_t *src
+     case MSP2_BENCH_CAPABILITIES:
+         if (length) { return MSP_RESULT_ERROR; }
+         sbufWriteU8(dst, 1);
++#ifdef USE_HX711
++        sbufWriteU8(dst, 3);
++#else
+         sbufWriteU8(dst, 1);
++#endif
+         sbufWriteU8(dst, getMotorCount());
+         sbufWriteU16(dst, BETABENCH_TIMEOUT_MS);
+         break;
+     case MSP2_BENCH_BEGIN:
+         if (length || state.active || ARMING_FLAG(ARMED) || !motorIsEnabled() || !isMotorProtocolDshot() || featureIsEnabled(FEATURE_3D)) { return MSP_RESULT_ERROR; }
++#ifdef USE_HX711
++        if (hx711Busy()) { return MSP_RESULT_ERROR; }
++#endif
+         stopOutputs();
+         state.latched = true;
+         state.active = true;
+@@ -97,13 +110,35 @@ mspResult_e betabenchProcess(mspDescriptor_t owner, int16_t command, sbuf_t *src
+         sbufWriteU32(dst, state.session);
+         sbufWriteU32(dst, micros());
+         sbufWriteU16(dst, getBatteryVoltage());
+-        sbufWriteU16(dst, (int16_t)getAmperage());
++        const int32_t current = getAmperage();
++        sbufWriteU16(dst, (int16_t)(current < -32768 ? -32768 : current > 32767 ? 32767 : current));
+         sbufWriteU8(dst, getMotorCount());
+         for (unsigned i = 0; i < getMotorCount(); i++) {
+             sbufWriteU16(dst, motorConvertToExternal(motor_disarmed[i]));
+         }
++#ifdef USE_HX711
++        hx711WriteSample(dst);
++#else
+         sbufFill(dst, 0, 25);
++#endif
+         break;
++#ifdef USE_HX711
++    case MSP2_HX711_TARE:
++    case MSP2_HX711_CALIBRATE:
++    case MSP2_HX711_SAVE_CALIBRATION:
++        if (ARMING_FLAG(ARMED) || state.active || areMotorsRunning()) { return MSP_RESULT_ERROR; }
++        state.latched = true;
++        setArmingDisabled(ARMING_DISABLED_MSP);
++        if (command == MSP2_HX711_CALIBRATE) {
++            if (length != 4) { return MSP_RESULT_ERROR; }
++            const uint32_t knownMg = sbufReadU32(src);
++            if (!knownMg || !hx711Capture(knownMg)) { return MSP_RESULT_ERROR; }
++        } else {
++            if (length) { return MSP_RESULT_ERROR; }
++            if (command == MSP2_HX711_TARE ? !hx711Capture(0) : !hx711Save()) { return MSP_RESULT_ERROR; }
++        }
++        break;
++#endif
+     default:
+         return MSP_RESULT_CMD_UNKNOWN;
+     }
+diff --git a/src/main/fc/tasks.c b/src/main/fc/tasks.c
+index 0b24ef69d..439b11d64 100644
+--- a/src/main/fc/tasks.c
++++ b/src/main/fc/tasks.c
+@@ -119,6 +119,9 @@
+ #ifdef USE_BETABENCH
+ #include "fc/betabench.h"
+ #endif
++#ifdef USE_HX711
++#include "drivers/hx711.h"
++#endif
+ 
+ // taskUpdateRxMain() has occasional peaks in execution time so normal moving average duration estimation doesn't work
+ // Decay the estimated max task duration by 1/(1 << RX_TASK_DECAY_SHIFT) on every invocation
+@@ -161,6 +164,9 @@ static void taskHandleSerial(timeUs_t currentTimeUs)
+ 
+     bool evaluateMspData = ARMING_FLAG(ARMED) ? MSP_SKIP_NON_MSP_DATA : MSP_EVALUATE_NON_MSP_DATA;
+     mspSerialProcess(evaluateMspData, mspFcProcessCommand, mspFcProcessReply);
++#ifdef USE_HX711
++    hx711Update();
++#endif
+ }
+ 
+ static void taskBatteryAlerts(timeUs_t currentTimeUs)
+diff --git a/src/main/pg/hx711.c b/src/main/pg/hx711.c
+new file mode 100644
+index 000000000..cccab3a8a
+--- /dev/null
++++ b/src/main/pg/hx711.c
+@@ -0,0 +1,10 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++#include "platform.h"
++#ifdef USE_HX711
++#include "pg/pg.h"
++#include "pg/pg_ids.h"
++#include "pg/hx711.h"
++
++// Zero defaults leave both resources unassigned and calibration invalid.
++PG_REGISTER(hx711Config_t, hx711Config, PG_HX711_CONFIG, 0);
++#endif
+diff --git a/src/main/pg/hx711.h b/src/main/pg/hx711.h
+new file mode 100644
+index 000000000..0d54ef886
+--- /dev/null
++++ b/src/main/pg/hx711.h
+@@ -0,0 +1,12 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++#pragma once
++#include "drivers/io_types.h"
++#include "pg/pg.h"
++
++typedef struct hx711Config_s {
++    ioTag_t sckTag;
++    ioTag_t doutTag;
++    int32_t offset;
++    float countsPerGram;
++} hx711Config_t;
++PG_DECLARE(hx711Config_t, hx711Config);
+diff --git a/src/main/pg/pg_ids.h b/src/main/pg/pg_ids.h
+index 16abfa529..c261f666b 100644
+--- a/src/main/pg/pg_ids.h
++++ b/src/main/pg/pg_ids.h
+@@ -166,6 +166,7 @@
+ #define PG_DRONECAN_CONFIG          565
+ #define PG_DRONECAN_DNA_CONFIG      567
+ #define PG_OSD_NAV_MAP_CONFIG       568
++#define PG_HX711_CONFIG             569
+ 
+ // TODO TBC
+ #define PG_DISPLAY_PORT_FBOSD_CONFIG 566
+diff --git a/src/main/target/common_pre.h b/src/main/target/common_pre.h
+index 244d477c3..2b876695d 100644
+--- a/src/main/target/common_pre.h
++++ b/src/main/target/common_pre.h
+@@ -68,6 +68,11 @@
+ 
+ #define USE_PARAMETER_GROUPS
+ 
++// Bench features are deliberately opt-in, including non-cloud builds.
++#if defined(USE_HX711) && !defined(USE_BETABENCH)
++#define USE_BETABENCH
++#endif
++
+ // SPA06-003 shares the SPL07-003 register map; the DPS310 driver handles both.
+ // Placed before the CLOUD_BUILD / USE_CONFIG gates so per-board configs that
+ // opt in via USE_BARO_SPA06_003 alone still pull the DPS310 driver in.
+-- 
+2.55.0.windows.3
+
+
+From a0e2002360d56b8b0de029cc1f1d1924f0fca7f4 Mon Sep 17 00:00:00 2001
+From: Yves <calibratedbeats@gmail.com>
+Date: Sun, 18 Oct 2026 19:32:17 +0800
+Subject: [PATCH 3/3] Test bench control and HX711 with mocked hardware and CI
+ builds
+
+---
+ .github/workflows/betabench.yml              |  51 +++++++
+ docs/development/Betabench.md                |  74 ++++++++++
+ src/test/betabench/betabench_test.c          | 141 +++++++++++++++++++
+ src/test/betabench/stubs/config/config.h     |   5 +
+ src/test/betabench/stubs/config/feature.h    |   5 +
+ src/test/betabench/stubs/drivers/io.h        |  16 +++
+ src/test/betabench/stubs/drivers/motor.h     |   8 ++
+ src/test/betabench/stubs/drivers/time.h      |   6 +
+ src/test/betabench/stubs/fc/runtime_config.h |   8 ++
+ src/test/betabench/stubs/flight/mixer.h      |   7 +
+ src/test/betabench/stubs/msp/msp.h           |   5 +
+ src/test/betabench/stubs/pg/hx711.h          |   6 +
+ src/test/betabench/stubs/platform.h          |   8 ++
+ src/test/betabench/stubs/sensors/battery.h   |   5 +
+ tools/test-betabench.sh                      |   9 ++
+ 15 files changed, 354 insertions(+)
+ create mode 100644 .github/workflows/betabench.yml
+ create mode 100644 docs/development/Betabench.md
+ create mode 100644 src/test/betabench/betabench_test.c
+ create mode 100644 src/test/betabench/stubs/config/config.h
+ create mode 100644 src/test/betabench/stubs/config/feature.h
+ create mode 100644 src/test/betabench/stubs/drivers/io.h
+ create mode 100644 src/test/betabench/stubs/drivers/motor.h
+ create mode 100644 src/test/betabench/stubs/drivers/time.h
+ create mode 100644 src/test/betabench/stubs/fc/runtime_config.h
+ create mode 100644 src/test/betabench/stubs/flight/mixer.h
+ create mode 100644 src/test/betabench/stubs/msp/msp.h
+ create mode 100644 src/test/betabench/stubs/pg/hx711.h
+ create mode 100644 src/test/betabench/stubs/platform.h
+ create mode 100644 src/test/betabench/stubs/sensors/battery.h
+ create mode 100644 tools/test-betabench.sh
+
+diff --git a/.github/workflows/betabench.yml b/.github/workflows/betabench.yml
+new file mode 100644
+index 000000000..4256309bb
+--- /dev/null
++++ b/.github/workflows/betabench.yml
+@@ -0,0 +1,51 @@
++name: Betabench
++on:
++  push:
++    branches: [codex/betabench]
++  pull_request:
++    paths:
++      - '**/*betabench*'
++      - '**/*hx711*'
++      - src/main/msp/**
++      - src/main/fc/tasks.c
++      - src/main/fc/init.c
++      - src/main/cli/cli.c
++      - src/main/drivers/resource.*
++      - src/main/target/common_pre.h
++      - src/main/pg/pg_ids.h
++      - mk/source.mk
++  workflow_dispatch:
++permissions:
++  contents: read
++jobs:
++  host-test:
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@v4
++      - run: bash tools/test-betabench.sh
++  clracingf4:
++    runs-on: ubuntu-latest
++    strategy:
++      matrix:
++        include:
++          - name: disabled
++            flags: ''
++          - name: bench
++            flags: '-DUSE_BETABENCH'
++          - name: hx711
++            flags: '-DUSE_HX711'
++    steps:
++      - uses: actions/checkout@v4
++      - run: git submodule update --init src/config
++      - uses: actions/cache@v4
++        with:
++          path: |
++            tools/arm-gnu-toolchain-13.3.rel1-x86_64-arm-none-eabi
++            downloads/arm-gnu-toolchain-13.3.rel1-x86_64-arm-none-eabi.tar.xz
++          key: arm-gnu-13.3.rel1-linux
++      - run: make arm_sdk_install
++      - run: make CONFIG=CLRACINGF4 EXTRA_FLAGS="${{ matrix.flags }}" -j2
++      - uses: actions/upload-artifact@v4
++        with:
++          name: CLRACINGF4-${{ matrix.name }}
++          path: obj/*.hex
+diff --git a/docs/development/Betabench.md b/docs/development/Betabench.md
+new file mode 100644
+index 000000000..580570577
+--- /dev/null
++++ b/docs/development/Betabench.md
+@@ -0,0 +1,74 @@
++# Betabench MSP extension v1
++
++Project-local MSPv2 command IDs, little-endian integers and IEEE754 float32. Normal MSPv2 CRC8-DVB-S2 framing applies. These IDs are local to this fork; upstream allocation has not been requested. Compile with `USE_BETABENCH`; `USE_HX711` implies it. Neither is enabled by default.
++
++Unknown commands and failed validation return an MSP error frame. Unsupported commands on stock firmware trigger stock-mode discovery; timeouts and transport corruption fail the connection and require reconnecting. Commands have empty ACKs unless specified otherwise.
++
++| ID | Name | Request | Response |
++|---|---|---|---|
++| 0x30F0 | BENCH_CAPABILITIES | Empty | u8 version=1, u8 features (bit0 bench, bit1 HX711 compiled), u8 motor count, u16 watchdog ms=500 |
++| 0x30F1 | BENCH_BEGIN | Empty | u32 session ID |
++| 0x30F2 | BENCH_SET_MOTORS | u32 session, u32 sequence, u8 count, u16 external outputs[count] | Empty ACK |
++| 0x30F3 | BENCH_STOP | Empty | Empty ACK |
++| 0x30F4 | BENCH_SAMPLE | Empty | Sample below |
++| 0x30F5 | HX711_TARE | Empty | Capture accepted ACK |
++| 0x30F6 | HX711_CALIBRATE | u32 known mass in mg, 1–500000000 | Capture accepted ACK |
++| 0x30F7 | HX711_SAVE_CALIBRATION | Empty | Persisted and verified ACK |
++
++## Sessions and outputs
++
++Begin requires a disarmed, enabled DShot controller, no active session or calibration capture, and no 3D mode. It clears all disarmed outputs, inhibits arming, returns a new nonzero boot-local session ID, resets the sequence to zero, and starts the watchdog. IDs are transport/session coordination, not an authentication boundary.
++
++Set requires the owning MSP descriptor, the current session ID, a forward sequence (signed modular 32-bit comparison), exact configured motor count and payload length, disarmed state, and every output in 1000–2000. Validation is complete before any values are applied. 1000 is stopped; 1001 is minimum running; 2000 is full throttle. No raw DShot command values are accepted. A valid Set alone refreshes the deadline. An elapsed deadline cannot be revived by a late Set; only a new Begin starts another session.
++
++The watchdog is checked from the 1 kHz main scheduler task and before extension commands; it uses unsigned elapsed milliseconds and expires at >=500 ms. Telemetry does not refresh it. Stop is accepted from any descriptor while disarmed. The browser follows Stop with output/session readback; failed confirmation marks the run aborted.
++
++Once a session or calibration operation claims bench control, legacy MSP_SET_MOTOR and arming-enable writes remain blocked until power cycling. Stop/timeout keep arming inhibited and invalidate the session. A fresh Begin permits another bench run without reboot. This prevents delayed legacy requests from restarting outputs after timeout. These builds are bench tools; power cycle before returning to normal Configurator motor testing. As with all software watchdogs, this assumes the FC scheduler and motor output hardware remain operational.
++
++## Sample payload
++
++Total length: `40 + 2 * motorCount` bytes.
++
++| Offset | Type | Meaning |
++|---|---|---|
++| 0 | u8 | Protocol version 1 |
++| 1 | u8 | State: 0 idle, 1 active, 2 bench latched/inactive |
++| 2 | u32 | Active session ID, otherwise 0 |
++| 6 | u32 | FC microseconds, wraps at 2^32 |
++| 10 | u16 | Battery voltage in 0.01 V |
++| 12 | i16 | Current in 0.01 A, clamped to i16 range |
++| 14 | u8 | Configured motor count N |
++| 15 | u16[N] | Disarmed motor-test output readback |
++| 15+2N | u8 | HX711 flags |
++| 16+2N | i32 | Sign-extended raw 24-bit HX711 reading |
++| 20+2N | i32 | Signed calibrated mass in milligrams |
++| 24+2N | u32 | HX711 sample sequence |
++| 28+2N | u32 | HX711 age in ms; UINT32_MAX before first sample |
++| 32+2N | i32 | Tare offset in raw counts |
++| 36+2N | f32 | Signed counts per gram |
++
++The 25-byte HX711 tail is zero-filled in bench-only builds. Flags: configured=1, fresh=2, calibrated=4, saturated=8, capture busy=16, last capture failed=32, saved=64. Fresh requires a sample age <=250 ms. Saturation means an ADC rail value. Missing/unconfigured/stale/saturated/uncalibrated mass must not be interpreted as a valid zero. Failed capture preserves the prior calibration; the failure flag describes that operation, not necessarily subsequent sample validity.
++
++Voltage/current validity comes from discovered battery configuration. Values are cached sensor readings at poll time, not simultaneous physical ADC conversions. Optional per-motor RPM/temperature use standard MSP_MOTOR_TELEMETRY and may be sampled less frequently. Host logs use monotonic elapsed time, with FC timestamps and HX sequence/age retained. Repeated HX sequences denote repeated latest readings, not additional HX conversions; 50 Hz polling does not capture every 80 Hz ADC conversion.
++
++## Calibration
++
++Only stopped, disarmed outputs with no active bench session permit tare, calibration, or saving. Capture is asynchronous: poll samples until busy clears; failed indicates rejection of the capture. At least eight fresh non-saturated conversions over one second are required. No conversion wait blocks the scheduler.
++
++Tare sets the RAM offset from the mean and requires sample standard deviation <=50 counts. Calibration requires a valid tare (or persisted calibration), uses `(loadedMean - offset) * 1000 / knownMg`, and accepts either load direction. Standard deviation must be <=max(50 counts, 0.5% of net counts); net change must exceed both ten counts and ten standard deviations. Invalid, stale, noisy, saturated, or insufficiently separated captures retain previous values. Save is explicit and uses normal Betaflight EEPROM persistence with readback; it may also persist other pending FC configuration edits. Capture itself never writes flash.
++
++## Golden vectors
++
++- MSPv1 API_VERSION request: `24 4D 3C 00 01 01`.
++- MSPv2 BENCH_CAPABILITIES request: `24 58 3C 00 F0 30 00 00 90`.
++- JS sample fixture in `tests/protocol.test.ts`: one motor at 1500, session7, 16.80V, 12.50A, -123g, raw -100, offset -10, scale -420 counts/g.
++- Production C session/driver tests: `bash tools/test-betabench.sh` in the firmware checkout.
++
++
++## Build and wiring
++
++Use `make CONFIG=CLRACINGF4 EXTRA_FLAGS="-DUSE_HX711" -j8` (or `-DUSE_BETABENCH` for watchdog only). Neither feature is enabled by default. Requires GCC 13.3.1. Run `bash tools/test-betabench.sh` for host-side production-code tests.
++
++For CLRACINGF4, disable UART4 functions and release SERIAL_TX/SERIAL_RX resource 4. Assign `resource HX711_SCK 1 A00` and `resource HX711_DOUT 1 A01`, then `save`. USB remains MSP. GPIO is 3.3V logic: verify module supply/logic compatibility. Disconnect the module before restoring UART4 resources.
++
++The companion web application and JS fixtures are in https://github.com/FractalEngineer/Betabench. Complete wiring and restoration instructions: https://github.com/FractalEngineer/Betabench/blob/main/firmware/README.md.
+diff --git a/src/test/betabench/betabench_test.c b/src/test/betabench/betabench_test.c
+new file mode 100644
+index 000000000..68542afdf
+--- /dev/null
++++ b/src/test/betabench/betabench_test.c
+@@ -0,0 +1,141 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++// Host tests execute the production MSP/session and HX711 code with mocked
++// motors, time, GPIO, flash and battery. No FC hardware is accessed.
++#include <assert.h>
++#include <math.h>
++#include <stdio.h>
++#include <string.h>
++#include "platform.h"
++#include "fc/betabench.h"
++#include "fc/betabench_state.h"
++#include "drivers/hx711.h"
++#include "drivers/hx711_math.h"
++#include "drivers/io.h"
++#include "pg/hx711.h"
++#include "msp/msp_protocol_v2_betaflight.h"
++
++static uint32_t now;
++bool testArmed;
++float motor_disarmed[8];
++static bool inhibited;
++static bool ready, clockHigh;
++static uint32_t inputBits;
++static unsigned pulses, reads, owners[3], flashWrites;
++static hx711Config_t config = { 1, 2, 0, 0 };
++static hx711Config_t flash;
++uint32_t millis(void) { return now; }
++uint32_t micros(void) { return now * 1000; }
++void delayMicroseconds(uint32_t us) { assert(us <= 1); }
++bool featureIsEnabled(unsigned feature) { (void)feature; return false; }
++bool motorIsEnabled(void) { return true; }
++bool isMotorProtocolDshot(void) { return true; }
++float motorConvertFromExternal(uint16_t n) { return n; }
++uint16_t motorConvertToExternal(float n) { return n; }
++uint8_t getMotorCount(void) { return 4; }
++bool areMotorsRunning(void) { for (unsigned i=0;i<4;i++) if(motor_disarmed[i] > 1000) return true; return false; }
++void setArmingDisabled(unsigned flag) { (void)flag; inhibited=true; }
++uint16_t getBatteryVoltage(void) { return 1680; }
++int32_t getAmperage(void) { return 1250; }
++const hx711Config_t *hx711Config(void) { return &config; }
++hx711Config_t *hx711ConfigMutable(void) { return &config; }
++void writeEEPROM(void) { flash=config; flashWrites++; }
++bool readEEPROM(void) { config=flash; return true; }
++IO_t IOGetByTag(uint8_t tag) { return tag<3?tag:0; }
++bool IOIsFreeOrPreinit(IO_t io) { return !owners[io]; }
++void IOInit(IO_t io, unsigned owner, unsigned index) { (void)index; owners[io]=owner; }
++void IOConfigGPIO(IO_t io, unsigned cfg) { (void)io; (void)cfg; }
++void IOHi(IO_t io) { (void)io; clockHigh=true; pulses++; }
++void IOLo(IO_t io) { (void)io; clockHigh=false; if(pulses==25) ready=false; }
++bool IORead(IO_t io) { (void)io; if(!clockHigh) return !ready; assert(reads<24); return !!(inputBits & (1u << (23-reads++))); }
++
++// The production serializer contract, with the same little-endian wire format.
++int sbufBytesRemaining(sbuf_t *b) { return b->end-b->ptr; }
++void sbufWriteU8(sbuf_t *b,uint8_t n) { assert(b->ptr<b->end); *b->ptr++=n; }
++void sbufWriteU16(sbuf_t *b,uint16_t n) { sbufWriteU8(b,n);sbufWriteU8(b,n>>8); }
++void sbufWriteU32(sbuf_t *b,uint32_t n) { sbufWriteU16(b,n);sbufWriteU16(b,n>>16); }
++void sbufFill(sbuf_t *b,uint8_t n,int length) { while(length--)sbufWriteU8(b,n); }
++uint8_t sbufReadU8(sbuf_t *b) { assert(b->ptr<b->end);return *b->ptr++; }
++uint16_t sbufReadU16(sbuf_t *b) { uint16_t n=sbufReadU8(b);return n|((uint16_t)sbufReadU8(b)<<8); }
++uint32_t sbufReadU32(sbuf_t *b) { uint32_t n=sbufReadU16(b);return n|((uint32_t)sbufReadU16(b)<<16); }
++
++static uint8_t reply[256];
++static unsigned replyLength;
++static mspResult_e call(unsigned owner, int16_t command, uint8_t *data, unsigned length)
++{
++    uint8_t empty=0;
++    sbuf_t src={data?data:&empty,(data?data:&empty)+length};
++    sbuf_t dst={reply,reply+sizeof(reply)};
++    const mspResult_e result=betabenchProcess(owner,command,&src,&dst);
++    replyLength=dst.ptr-reply;
++    return result;
++}
++static uint32_t get32(unsigned offset) { sbuf_t b={reply+offset,reply+replyLength};return sbufReadU32(&b); }
++static void feed(int32_t raw) { inputBits=(uint32_t)raw&0xffffff;ready=true;pulses=reads=0;hx711Update();assert(pulses==25&&reads==24); }
++static void capture(int32_t base) { for(unsigned i=0;i<11;i++){now+=100;feed(base+(int32_t)(i%3)-1);} }
++
++int main(void)
++{
++    assert(hx711SignExtend(0xffffff)==-1);
++    assert(hx711SignExtend(0x800000)==-8388608);
++    assert(hx711SignExtend(0x7fffff)==8388607);
++    float scale=999;
++    assert(!hx711Scale(10,1,10,100000,&scale)&&scale==999);
++    assert(!hx711Scale(1000,100000,0,100000,&scale)&&scale==999);
++    assert(hx711Scale(-42000,1,0,100000,&scale)&&fabsf(scale+420)<0.01f);
++
++    benchState_t wrap={.session=1,.sequence=1,.lastCommandMs=UINT32_MAX-100,.active=true};
++    assert(!benchExpired(&wrap,398));assert(benchExpired(&wrap,399));
++    assert(!benchAccept(&wrap,2,2,0));assert(!benchAccept(&wrap,1,1,0));
++
++    // Identical and already-owned GPIO resources must not initialize.
++    config.doutTag=1;hx711Init();
++    uint8_t hxData[25];sbuf_t hxBuf={hxData,hxData+25};hx711WriteSample(&hxBuf);
++    assert(!(hxData[0]&HX711_CONFIGURED));
++    config.doutTag=2;owners[1]=99;hx711Init();
++    hxBuf=(sbuf_t){hxData,hxData+25};hx711WriteSample(&hxBuf);
++    assert(!(hxData[0]&HX711_CONFIGURED));owners[1]=0;
++    betabenchInit();
++    assert(call(1,MSP2_BENCH_CAPABILITIES,NULL,0)==MSP_RESULT_ACK&&replyLength==5);
++    assert(reply[0]==1&&reply[1]==3&&reply[2]==4);
++    testArmed=true;assert(call(1,MSP2_BENCH_BEGIN,NULL,0)==MSP_RESULT_ERROR);testArmed=false;
++    assert(call(1,MSP2_BENCH_BEGIN,NULL,0)==MSP_RESULT_ACK);const uint32_t session=get32(0);
++    assert(inhibited&&betabenchLocked());
++    uint8_t values[17];sbuf_t b={values,values+sizeof(values)};
++    sbufWriteU32(&b,session);sbufWriteU32(&b,1);sbufWriteU8(&b,4);
++    for(unsigned i=0;i<4;i++)sbufWriteU16(&b,1500);
++    assert(call(2,MSP2_BENCH_SET_MOTORS,values,17)==MSP_RESULT_ERROR);
++    assert(call(1,MSP2_BENCH_SET_MOTORS,values,16)==MSP_RESULT_ERROR);
++    values[10]=255;assert(call(1,MSP2_BENCH_SET_MOTORS,values,17)==MSP_RESULT_ERROR);values[10]=5;
++    assert(call(1,MSP2_BENCH_SET_MOTORS,values,17)==MSP_RESULT_ACK&&motor_disarmed[0]==1500);
++    assert(call(1,MSP2_BENCH_SET_MOTORS,values,17)==MSP_RESULT_ERROR);
++    for(unsigned i=1;i<=5;i++){now=i*100;assert(call(1,MSP2_BENCH_SAMPLE,NULL,0)==MSP_RESULT_ACK);assert(replyLength==48);}
++    assert(motor_disarmed[0]==1000&&get32(2)==0);
++    assert(call(1,MSP2_BENCH_SET_MOTORS,values,17)==MSP_RESULT_ERROR);
++    assert(call(1,MSP2_BENCH_BEGIN,NULL,0)==MSP_RESULT_ACK&&get32(0)!=session);
++    assert(call(1,MSP2_BENCH_STOP,NULL,0)==MSP_RESULT_ACK);
++    assert(betabenchLocked());
++
++    feed(100);
++    assert(call(1,MSP2_HX711_TARE,NULL,0)==MSP_RESULT_ACK);capture(100);
++    assert(config.offset==100&&flashWrites==0);
++    uint8_t mass[4];b=(sbuf_t){mass,mass+4};sbufWriteU32(&b,100000);
++    assert(call(1,MSP2_HX711_CALIBRATE,mass,4)==MSP_RESULT_ACK);
++    assert(call(1,MSP2_BENCH_BEGIN,NULL,0)==MSP_RESULT_ERROR);
++    capture(42100);assert(fabsf(config.countsPerGram-420)<0.01f&&flashWrites==0);
++    assert(call(1,MSP2_HX711_SAVE_CALIBRATION,NULL,0)==MSP_RESULT_ACK&&flashWrites==1);
++    config.countsPerGram=0;assert(readEEPROM()&&fabsf(config.countsPerGram-420)<0.01f);
++    assert(call(1,MSP2_HX711_CALIBRATE,mass,4)==MSP_RESULT_ACK);now+=1100;hx711Update();
++    assert(fabsf(config.countsPerGram-420)<0.01f);
++    assert(call(1,MSP2_BENCH_SAMPLE,NULL,0)==MSP_RESULT_ACK);
++    assert(reply[23]&HX711_FAILED);assert(!(reply[23]&HX711_FRESH));
++    feed(8388607);assert(call(1,MSP2_HX711_TARE,NULL,0)==MSP_RESULT_ERROR);
++    feed(100);assert(call(1,MSP2_HX711_TARE,NULL,0)==MSP_RESULT_ACK);
++    for(unsigned i=0;i<11;i++){now+=100;feed(i%2?3100:-2900);}
++    assert(config.offset==100); // An unstable tare preserves the previous zero.
++    assert(call(1,MSP2_HX711_CALIBRATE,mass,4)==MSP_RESULT_ACK);
++    capture(-41900);assert(fabsf(config.countsPerGram+420)<0.01f);
++    assert(call(1,MSP2_HX711_SAVE_CALIBRATION,NULL,0)==MSP_RESULT_ACK&&flashWrites==2);
++    uint8_t zeroMass[4]={0};assert(call(1,MSP2_HX711_CALIBRATE,zeroMass,4)==MSP_RESULT_ERROR);
++    puts("PASS: production session/watchdog/MSP and HX711 GPIO/capture/calibration/persistence");
++    return 0;
++}
+diff --git a/src/test/betabench/stubs/config/config.h b/src/test/betabench/stubs/config/config.h
+new file mode 100644
+index 000000000..d5609e475
+--- /dev/null
++++ b/src/test/betabench/stubs/config/config.h
+@@ -0,0 +1,5 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++#pragma once
++#include <stdbool.h>
++void writeEEPROM(void);
++bool readEEPROM(void);
+diff --git a/src/test/betabench/stubs/config/feature.h b/src/test/betabench/stubs/config/feature.h
+new file mode 100644
+index 000000000..a76988aca
+--- /dev/null
++++ b/src/test/betabench/stubs/config/feature.h
+@@ -0,0 +1,5 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++#pragma once
++#include <stdbool.h>
++#define FEATURE_3D 1
++bool featureIsEnabled(unsigned feature);
+diff --git a/src/test/betabench/stubs/drivers/io.h b/src/test/betabench/stubs/drivers/io.h
+new file mode 100644
+index 000000000..f5e26a7cc
+--- /dev/null
++++ b/src/test/betabench/stubs/drivers/io.h
+@@ -0,0 +1,16 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++#pragma once
++#include <stdint.h>
++#include <stdbool.h>
++typedef unsigned IO_t;
++#define OWNER_HX711_SCK 1
++#define OWNER_HX711_DOUT 2
++#define IOCFG_OUT_PP 1
++#define IOCFG_IPU 2
++IO_t IOGetByTag(uint8_t tag);
++bool IOIsFreeOrPreinit(IO_t io);
++void IOInit(IO_t io, unsigned owner, unsigned index);
++void IOConfigGPIO(IO_t io, unsigned cfg);
++void IOLo(IO_t io);
++void IOHi(IO_t io);
++bool IORead(IO_t io);
+diff --git a/src/test/betabench/stubs/drivers/motor.h b/src/test/betabench/stubs/drivers/motor.h
+new file mode 100644
+index 000000000..202fae440
+--- /dev/null
++++ b/src/test/betabench/stubs/drivers/motor.h
+@@ -0,0 +1,8 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++#pragma once
++#include <stdint.h>
++#include <stdbool.h>
++float motorConvertFromExternal(uint16_t value);
++uint16_t motorConvertToExternal(float value);
++bool motorIsEnabled(void);
++bool isMotorProtocolDshot(void);
+diff --git a/src/test/betabench/stubs/drivers/time.h b/src/test/betabench/stubs/drivers/time.h
+new file mode 100644
+index 000000000..078b46bdc
+--- /dev/null
++++ b/src/test/betabench/stubs/drivers/time.h
+@@ -0,0 +1,6 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++#pragma once
++#include <stdint.h>
++uint32_t millis(void);
++uint32_t micros(void);
++void delayMicroseconds(uint32_t value);
+diff --git a/src/test/betabench/stubs/fc/runtime_config.h b/src/test/betabench/stubs/fc/runtime_config.h
+new file mode 100644
+index 000000000..b84a57750
+--- /dev/null
++++ b/src/test/betabench/stubs/fc/runtime_config.h
+@@ -0,0 +1,8 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++#pragma once
++#include <stdbool.h>
++extern bool testArmed;
++#define ARMED 1
++#define ARMING_FLAG(mask) (testArmed)
++#define ARMING_DISABLED_MSP 65536
++void setArmingDisabled(unsigned flag);
+diff --git a/src/test/betabench/stubs/flight/mixer.h b/src/test/betabench/stubs/flight/mixer.h
+new file mode 100644
+index 000000000..774eb7839
+--- /dev/null
++++ b/src/test/betabench/stubs/flight/mixer.h
+@@ -0,0 +1,7 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++#pragma once
++#include <stdint.h>
++#include <stdbool.h>
++extern float motor_disarmed[8];
++uint8_t getMotorCount(void);
++bool areMotorsRunning(void);
+diff --git a/src/test/betabench/stubs/msp/msp.h b/src/test/betabench/stubs/msp/msp.h
+new file mode 100644
+index 000000000..c1cde5e0a
+--- /dev/null
++++ b/src/test/betabench/stubs/msp/msp.h
+@@ -0,0 +1,5 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++#pragma once
++#include "common/streambuf.h"
++typedef int mspDescriptor_t;
++typedef enum { MSP_RESULT_ACK = 1, MSP_RESULT_ERROR = -1, MSP_RESULT_CMD_UNKNOWN = -2 } mspResult_e;
+diff --git a/src/test/betabench/stubs/pg/hx711.h b/src/test/betabench/stubs/pg/hx711.h
+new file mode 100644
+index 000000000..e34706130
+--- /dev/null
++++ b/src/test/betabench/stubs/pg/hx711.h
+@@ -0,0 +1,6 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++#pragma once
++#include <stdint.h>
++typedef struct { uint8_t sckTag, doutTag; int32_t offset; float countsPerGram; } hx711Config_t;
++const hx711Config_t *hx711Config(void);
++hx711Config_t *hx711ConfigMutable(void);
+diff --git a/src/test/betabench/stubs/platform.h b/src/test/betabench/stubs/platform.h
+new file mode 100644
+index 000000000..b63c26030
+--- /dev/null
++++ b/src/test/betabench/stubs/platform.h
+@@ -0,0 +1,8 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++#pragma once
++#include <stdbool.h>
++#include <stdint.h>
++#define MAX_SUPPORTED_MOTORS 8
++static inline uint32_t __get_PRIMASK(void) { return 0; }
++static inline void __disable_irq(void) {}
++static inline void __set_PRIMASK(uint32_t value) { (void)value; }
+diff --git a/src/test/betabench/stubs/sensors/battery.h b/src/test/betabench/stubs/sensors/battery.h
+new file mode 100644
+index 000000000..b7ff236a6
+--- /dev/null
++++ b/src/test/betabench/stubs/sensors/battery.h
+@@ -0,0 +1,5 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++#pragma once
++#include <stdint.h>
++uint16_t getBatteryVoltage(void);
++int32_t getAmperage(void);
+diff --git a/tools/test-betabench.sh b/tools/test-betabench.sh
+new file mode 100644
+index 000000000..8b0e56b5e
+--- /dev/null
++++ b/tools/test-betabench.sh
+@@ -0,0 +1,9 @@
++#!/usr/bin/env bash
++set -euo pipefail
++cd "$(dirname "$0")/.."
++mkdir -p obj/betabench-test
++cc -std=c11 -Wall -Wextra -Werror -DUSE_BETABENCH -DUSE_HX711 \
++  -Isrc/test/betabench/stubs -Isrc/main \
++  src/test/betabench/betabench_test.c src/main/fc/betabench.c src/main/drivers/hx711.c \
++  -lm -o obj/betabench-test/test
++obj/betabench-test/test
+-- 
+2.55.0.windows.3
+

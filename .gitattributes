@@ -1,0 +1,3 @@
+* text=auto eol=lf
+# Mail patches contain significant context-line spaces and mail signatures.
+*.patch -text -whitespace
