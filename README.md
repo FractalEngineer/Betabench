@@ -7,7 +7,7 @@ A browser-based motor and ESC test bench using a Betaflight flight controller.
 
 **[Open Betabench](https://fractalengineer.github.io/Betabench/)** · [Implementation checklist](PLAN.md) · [Firmware and wiring](firmware/README.md) · [MSP extension](firmware/PROTOCOL.md)
 
-![BetaBench running the MiniQuadTestBench profile with simulated current, voltage, power and thrust measurements](docs/images/test-bench.png)
+![BetaBench running the MiniQuadTestBench profile with simulated current, voltage, power and thrust measurements](docs/images/mqtb-profile.png)
 
 _MiniQuadTestBench simulator run; no hardware connected._
 
@@ -30,6 +30,10 @@ The app requires Betaflight MSP API 1.42+ and conventional DShot150/300/600. Rev
 - Current, voltage, power and thrust curves can be displayed together in distinct colors. History supports run overlays. Load-cell units can be g, kg, N or lbf; exported measurements remain in grams. Missing measurements stay empty; thrust efficiency is calculated only with valid thrust and power. Simulated runs are explicitly marked.
 
 ## Load cell
+
+![BetaBench load-cell page showing calibration controls, target and pad selection, and generated resource CLI](docs/images/load-cell.png)
+
+_Simulator load-cell setup; no hardware connected._
 
 Build the optional firmware with `USE_HX711`, connect an HX711 to free GPIO resources, then use **Load cell** to tare the empty stand, enter a known mass in grams, calibrate, and save in this browser for this FC UID. Capture needs stopped motors and stable samples. GPIO assignments alone are stored on the FC. Calibration and logs can be exported with run JSON.
 

@@ -15,12 +15,14 @@ import {
   Copy,
   FlaskConical,
   Gauge,
+  Moon,
   Play,
   Plus,
   Radio,
   Save,
   Scale,
   SlidersHorizontal,
+  Sun,
   Trash2,
   Unplug,
   Zap,
@@ -382,13 +384,24 @@ export default function App() {
                 : "Disconnected"}
             </span>
             <button
+              className="icon"
+              aria-label={theme === "dark" ? "Light theme" : "Dark theme"}
+              title={
+                theme === "dark"
+                  ? "Switch to light theme"
+                  : "Switch to dark theme"
+              }
               onClick={() => {
                 const next = theme === "dark" ? "light" : "dark";
                 setTheme(next);
                 localStorage.setItem("theme", next);
               }}
             >
-              {theme === "dark" ? "Light theme" : "Dark theme"}
+              {theme === "dark" ? (
+                <Sun size={17} aria-hidden="true" />
+              ) : (
+                <Moon size={17} aria-hidden="true" />
+              )}
             </button>
           </div>
         </header>
