@@ -37,7 +37,7 @@ _Simulator load-cell setup with a manually selected target; no hardware connecte
 
 Build the optional firmware with `USE_HX711`, connect an HX711 to free GPIO resources, then use **Load cell** to tare the empty stand, enter a known mass in grams, calibrate, and save in this browser for this FC UID. Capture needs stopped motors and stable samples. GPIO assignments alone are stored on the FC. Calibration and logs can be exported with run JSON.
 
-Search for and explicitly select a target, then choose repurposed pads to generate resource CLI commands; no target is preselected. For UART pads, paste the complete `get _uart` output so the helper can unset only features on the selected ports using modern `<feature>_uart` settings. USB MSP and unrelated ports are preserved. Custom supports current resource dumps. CLRACINGF4 can use TX4/PA0 for clock and RX4/PA1 for data, with USB for MSP. Pins are assigned through normal Betaflight CLI resources with Save/Reboot, without changing the board target. See the [firmware guide](firmware/README.md) for signal voltage, complete commands, restoration, and build instructions.
+Search for and explicitly select a target, then choose repurposed pads to generate resource CLI commands; no target is preselected. The helper uses the selected target configuration to release every mapped resource on the two GPIOs, then assigns HX711 clock/data and saves. Motor, servo, LED, beeper, PINIO, ADC and bus resources are supported; **Custom GPIO…** accepts a GPIO directly. No port-assignment paste is required and no serial/protocol settings are changed. Custom supports resource dumps from remapped FCs. CLRACINGF4 can use TX4/PA0 for clock and RX4/PA1 for data, with USB for MSP. Pins are assigned through normal Betaflight CLI resources with Save/Reboot, without changing the board target. See the [firmware guide](firmware/README.md) for signal voltage, complete commands, restoration, and build instructions.
 
 ## Development
 
@@ -52,6 +52,14 @@ npx playwright test
 ```
 
 The dev URL is `http://127.0.0.1:5173/Betabench/`. Browser tests use installed Microsoft Edge. Set `BETABENCH_BASE_URL` to test another deployment. For a Chromium-only environment, change the Playwright `channel` or install Edge with `npx playwright install msedge`.
+
+The resource helper ships a generated snapshot of [Betaflight target configurations](https://github.com/betaflight/config), pinned to the revision in `src/targets.json`. Each target records its source header. To refresh it from a config checkout:
+
+```sh
+python scripts/update-targets.py /path/to/betaflight/config
+npx prettier --write src/targets.json
+python scripts/test_update_targets.py
+```
 
 The deployment workflow runs unit tests and the production build on pull requests, and deploys `main` through GitHub Pages. Source and the lockfile are tracked; `dist/`, dependencies, build tools, and the isolated firmware worktree are ignored.
 

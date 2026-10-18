@@ -1,103 +1,79 @@
 import { it, expect } from "vitest";
-import { resourceCli, uartAssignments } from "../src/ResourceSetup";
+import { gpioPin, resourceCli, resourcePads } from "../src/resources";
 import targets from "../src/targets.json";
-it("releases UART functions and all resource aliases for the chosen pads", () => {
-  const target = targets.targets.find((t) => t.name === "CLRACINGF4")!;
-  const sck = target.pads.find((p) => p.label === "TX4")!,
-    dout = target.pads.find((p) => p.label === "RX4")!;
+const target = targets.targets.find((t) => t.name === "CLRACINGF4")!;
+const pad = (label: string) => target.pads.find((p) => p.label === label)!;
+
+it("generates reassignment directly from target resources, without UART configuration", () => {
+  expect(resourceCli(target.pads, pad("TX4"), pad("RX4"))).toBe(
+    "resource SERIAL_TX 4 NONE\nresource SERIAL_RX 4 NONE\nresource HX711_SCK 1 A00\nresource HX711_DOUT 1 A01\nsave",
+  );
+});
+it("releases every GPIO alias and leaves unrelated resources and settings alone", () => {
+  const cli = resourceCli(target.pads, pad("M5"), pad("RX4"));
+  expect(cli).toContain("resource MOTOR 5 NONE");
+  expect(cli).toContain("resource LED_STRIP 1 NONE");
+  expect(cli).not.toMatch(/SERIAL_TX 4|SERIAL_RX 1|^set |^serial /m);
+  const duplicate = resourceCli(
+    [...target.pads, pad("M5")],
+    pad("M5"),
+    pad("RX4"),
+  );
+  expect(duplicate.match(/resource MOTOR 5 NONE/g)).toHaveLength(1);
+});
+it("supports non-UART target resources and free GPIOs", () => {
+  const cli = resourceCli(target.pads, pad("BEEPER"), pad("PINIO1"));
+  expect(cli).toBe(
+    "resource BEEPER 1 NONE\nresource PINIO 1 NONE\nresource HX711_SCK 1 B04\nresource HX711_DOUT 1 A14\nsave",
+  );
   expect(
     resourceCli(
       target.pads,
-      sck,
-      dout,
-      "gps_uart = UART4\nmsp_1_uart = VCP\nrx_uart = UART1",
+      { ...pad("BEEPER"), pin: "PA0" },
+      { ...pad("PINIO1"), pin: "B02" },
     ),
   ).toBe(
-    "set gps_uart = NONE\nresource SERIAL_TX 4 NONE\nresource SERIAL_RX 4 NONE\nresource HX711_SCK 1 A00\nresource HX711_DOUT 1 A01\nsave",
+    "resource SERIAL_TX 4 NONE\nresource HX711_SCK 1 A00\nresource HX711_DOUT 1 B02\nsave",
   );
-  const motor = target.pads.find((p) => p.label === "M5")!;
-  const cli = resourceCli(target.pads, motor, dout, "gps_uart = UART4");
-  expect(cli).toContain("resource MOTOR 5 NONE");
-  expect(cli).toContain("resource LED_STRIP 1 NONE");
-  expect(() => resourceCli(target.pads, sck, sck)).toThrow();
 });
-it("offers unique target names and at least two distinct pads per target", () => {
+it("parses a custom resource dump, ignoring comments/settings and honoring remaps/NONE", () => {
+  const pads = resourcePads(`
+# resource MOTOR 1 A00
+resource MOTOR 1 A01
+resource MOTOR 1 NONE
+resource MOTOR 3 B08
+resource LED_STRIP 1 B08
+resource SERIAL_RX 2 A03
+resource SERIAL_RX 2 A04
+resource PINIO 1 A99
+set rx_uart = UART2
+serial 1 0 115200 57600 0 115200
+`);
+  expect(pads.map((p) => p.pin)).toEqual(["B08", "B08", "A04"]);
+  expect(resourceCli(pads, pads[0], pads[2])).toBe(
+    "resource MOTOR 3 NONE\nresource LED_STRIP 1 NONE\nresource SERIAL_RX 2 NONE\nresource HX711_SCK 1 B08\nresource HX711_DOUT 1 A04\nsave",
+  );
+});
+it("validates GPIO input and rejects equal pins after normalization", () => {
+  expect(gpioPin(" pa0 ")).toBe("A00");
+  expect(gpioPin("K15")).toBe("K15");
+  for (const invalid of ["A16", "B99", "Z01", "A", "", "A01\nsave"])
+    expect(() => gpioPin(invalid)).toThrow("GPIO");
+  expect(() =>
+    resourceCli(target.pads, pad("TX4"), { ...pad("RX4"), pin: "PA0" }),
+  ).toThrow("different GPIO");
+});
+it("keeps generated target resources unique, valid and traceable to config headers", () => {
   expect(new Set(targets.targets.map((t) => t.name)).size).toBe(
     targets.targets.length,
   );
-  for (const t of targets.targets)
+  for (const t of targets.targets) {
+    expect(t.source).toMatch(/^configs\/[^/]+\/[^/]+\/config.h$/);
     expect(new Set(t.pads.map((p) => p.pin)).size).toBeGreaterThanOrEqual(2);
-});
-
-it("parses active get/dump assignments, ignores defaults and uses the final value", () => {
-  expect([
-    ...uartAssignments(`
-# get _uart
-rx_uart = UART1
-Allowed values: NONE, VCP, UART1, UART4
-Default value: UART4
-# set rx_uart = UART4
-set gps_uart = UART4
-SET MSP_1_UART = vcp
-set gps_uart = NONE
-serial 3 0 115200 57600 0 115200
-`),
-  ]).toEqual([
-    ["rx_uart", "UART1"],
-    ["gps_uart", "NONE"],
-    ["msp_1_uart", "VCP"],
-  ]);
-});
-it("unsets all matching features across both pads while preserving unrelated ports and selectors", () => {
-  const pads = [
-    { label: "TX1", resource: "SERIAL_TX", index: 1, pin: "A09" },
-    { label: "RX4", resource: "SERIAL_RX", index: 4, pin: "A01" },
-  ];
-  const cli = resourceCli(
-    pads,
-    pads[0],
-    pads[1],
-    `
-set msp_1_uart = VCP
-set msp_2_uart = UART1
-rx_uart = UART4
-telemetry_1_uart = UART4
-gps_uart = UART10
-vtx_uart = NONE
-set telemetry_1_protocol = CRSF
-set gps_baudrate = 115200
-`,
-  );
-  expect(cli.split("\n").slice(0, 3)).toEqual([
-    "set msp_2_uart = NONE",
-    "set rx_uart = NONE",
-    "set telemetry_1_uart = NONE",
-  ]);
-  expect(cli).not.toMatch(/msp_1|gps_|vtx_|protocol|baudrate|^serial /m);
-});
-it("requires current assignments for UART pads, including aliases, and allows an unused UART", () => {
-  const pads = [
-    { label: "M1", resource: "MOTOR", index: 1, pin: "A09" },
-    { label: "TX1", resource: "SERIAL_TX", index: 1, pin: "A09" },
-    { label: "M2", resource: "MOTOR", index: 2, pin: "B00" },
-  ];
-  for (const settings of [
-    "",
-    "# rx_uart = UART1",
-    "serial 0 0 115200 57600 0 115200",
-  ])
-    expect(() => resourceCli(pads, pads[0], pads[2], settings)).toThrow(
-      "get _uart",
+    expect(new Set(t.pads.map((p) => `${p.resource} ${p.index}`)).size).toBe(
+      t.pads.length,
     );
-  const cli = resourceCli(
-    pads,
-    pads[0],
-    pads[2],
-    "msp_1_uart = VCP\nrx_uart = UART2",
-  );
-  expect(cli).toContain("resource SERIAL_TX 1 NONE");
-  expect(cli).not.toMatch(/^set |^serial /m);
-  expect(resourceCli([pads[0], pads[2]], pads[0], pads[2])).toContain(
-    "resource HX711_DOUT 1 B00",
-  );
+    expect(new Set(t.pads.map((p) => p.label)).size).toBe(t.pads.length);
+    for (const p of t.pads) expect(gpioPin(p.pin)).toBe(p.pin);
+  }
 });

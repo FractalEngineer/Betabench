@@ -28,8 +28,9 @@ Betaflight changes are limited to an opt-in `USE_HX711` raw sensor driver, persi
 - [x] Show independently selectable current, voltage, power and thrust curves together.
 - [x] Add grams, kilograms, newtons and pounds-force display/calibration units; retain grams in logs.
 - [x] Add target/pad selectors and a custom resource-dump CLI generator; remove supply/ground UI rows.
-- [x] Replace deprecated serial commands with per-feature UART assignments from current `get _uart` output; preserve unrelated ports and USB MSP.
-  - Verified with 31 unit tests, 10 Edge browser tests and a production build; refreshed the load-cell screenshot.
+- [x] Generate generic GPIO reassignment directly from the selected target configuration; release every selected GPIO alias with resource commands only.
+- [x] Remove the UART-assignment paste requirement, expand target resources, and support direct custom GPIO entry.
+  - Pinned 629 target configurations; 32 web unit tests, four generator tests, 10 Edge browser tests and production build passed. Refreshed the load-cell screenshot.
 - [x] Retain stock MSP discovery, priority Stop, 50 Hz worker commands, 20 Hz telemetry and run aborts.
 - [x] Retain incremental run logging, interrupted-run recovery, overlays and CSV/JSON exports.
 - [x] Run HX711 driver host tests.
