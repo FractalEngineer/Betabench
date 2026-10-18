@@ -30,7 +30,7 @@ Only mark verification complete when the corresponding check has actually run.
 - [ ] Complete physical FC/HX711 validation.
   - Pending: no physical FC/load cell was exercised. USB loss, GPIO timing/voltage, sensor accuracy, known-mass calibration, and restrained motor operation require hardware.
 - [ ] Deploy and verify the web UI.
-  - Blocked pending approval to merge the web app PR into main: automatic approval review rejected a direct default-branch push. Pages is configured, and the implementation is on `codex/web-motor-lab` in draft PR https://github.com/FractalEngineer/Betabench/pull/1.
+  - Pending testing/validation before deployment (user request): automatic approval review rejected a direct default-branch push. Pages is configured, and the implementation is on `codex/web-motor-lab` in draft PR https://github.com/FractalEngineer/Betabench/pull/1.
 - [x] Push reviewed firmware commits to the fork feature branch.
 - [x] Record firmware commit, comparison details, and validation for a later PR.
 
@@ -38,13 +38,13 @@ Only mark verification complete when the corresponding check has actually run.
 
 Use `codex/betabench` from base `6dbc4218f` (2026.6.1), in an isolated worktree. Preserve the original detached checkout, modified `src/config`, and untracked `lib/main/dronecan/`. Initialize the clean worktree's config submodule at the base's recorded commit. Leave CLRACINGF4 target configuration unchanged.
 
-Push only to `myfork` (`https://github.com/FractalEngineer/betaflight`) and track `myfork/codex/betabench`. Keep focused, buildable commits; inspect the complete diff for unrelated content. Record base/feature SHAs, build commands, test results, and comparison details. Export a reproducible patch. Do not create or merge a PR during this implementation.
+Push only to `myfork` (`https://github.com/FractalEngineer/betaflight`) and track `myfork/codex/betabench`. Keep focused, buildable commits; inspect the complete diff for unrelated content. Record base/feature SHAs, build commands, test results, and comparison details. Export a reproducible patch. Do not open an upstream Betaflight PR or merge the web app PR until testing/validation is complete and the user requests it.
 
 ## Web app and profiles
 
 Connection controls, FC identity/capabilities, selected motors, graphical editor, live measurements, run history, and HX711 setup. One curve controls selected motors simultaneously; unselected motors stay stopped. Editor supports draggable throttle/time points, numeric editing, ramps, steps, holds, explicit stops, duplication, and JSON import/export. Stop differs from minimum running throttle. Support conventional DShot; reject 3D/reversible output. Include a simulator sharing the device interface.
 
-MQTB preset, relative to Run: 0Ã¢â‚¬â€œ4s 3.5%; 4Ã¢â‚¬â€œ6s 50%; 6Ã¢â‚¬â€œ8s 3.5%; 8Ã¢â‚¬â€œ10s 75%; 10Ã¢â‚¬â€œ12s 3.5%; 12Ã¢â‚¬â€œ14s 100%; 14Ã¢â‚¬â€œ16s minimum running; 16Ã¢â‚¬â€œ22s minimumÃ¢â€ â€™100% ramp; 22Ã¢â‚¬â€œ24s 100%; 24Ã¢â‚¬â€œ26s 3.5%; 26Ã¢â‚¬â€œ28s stopped. Attribute JyeSmith/dshot-esc-tester at `8695f27fb705892a0906acddc60b4a4e8dfb21a3`; preserve applicable notices. Second preset: 0Ã¢â€ â€™100Ã¢â€ â€™0, six seconds each way, stopped at endpoints. Both editable.
+MQTB preset, relative to Run: 0–4s 3.5%; 4–6s 50%; 6–8s 3.5%; 8–10s 75%; 10–12s 3.5%; 12–14s 100%; 14–16s minimum running; 16–22s minimum→100% ramp; 22–24s 100%; 24–26s 3.5%; 26–28s stopped. Attribute JyeSmith/dshot-esc-tester at `8695f27fb705892a0906acddc60b4a4e8dfb21a3`; preserve applicable notices. Second preset: 0→100→0, six seconds each way, stopped at endpoints. Both editable.
 
 ## Serial, runs, and storage
 
@@ -56,7 +56,7 @@ Incremental IndexedDB storage with recoverable interrupted runs. Snapshot profil
 
 ## Optional firmware
 
-`USE_BETABENCH`: sessions, combined samples, 500ms motor-command watchdog. `USE_HX711`: implies USE_BETABENCH. Neither default; retain Betaflight licensing. Local MSPv2 IDs 0x30F0Ã¢â‚¬â€œ0x30F7: capabilities, begin, set motors, stop, sample, tare, calibrate, save calibration. Versioned payloads, shared constants, test vectors.
+`USE_BETABENCH`: sessions, combined samples, 500ms motor-command watchdog. `USE_HX711`: implies USE_BETABENCH. Neither default; retain Betaflight licensing. Local MSPv2 IDs 0x30F0–0x30F7: capabilities, begin, set motors, stop, sample, tare, calibrate, save calibration. Versioned payloads, shared constants, test vectors.
 
 Begin disarmed with outputs stopped and arming inhibited; commands contain session ID, increasing sequence, all motor values. Fully validate before output changes. Only valid motor commands feed watchdog. Timeout stops and invalidates; explicit Begin required. Stop clears outputs/session. Prevent legacy motor writes bypassing active session. Samples include FC timestamps, outputs/electrical, optional motor data, and HX711 values/freshness.
 

@@ -10,13 +10,13 @@ Date: 2026-10-18 (Asia/Taipei).
 - Feature HEAD: `a0e2002360d56b8b0de029cc1f1d1924f0fca7f4`.
 - Config submodule remains `749fff19942fd7b44fa8020a086e1b566054cae9`; no target or gitlink changes.
 - [Compare feature against base](https://github.com/FractalEngineer/betaflight/compare/6dbc4218f...codex/betabench).
-- No PR has been created.
+- No upstream Betaflight PR has been created.
 
 Commits:
 
-1. `a0e42c5e2` â€” opt-in MSP bench sessions and command watchdog.
-2. `b821aed44` â€” HX711 driver, GPIO resources, calibration and save/readback.
-3. `a0e200236` â€” production-code host tests, protocol documentation, and CI build matrix.
+1. `a0e42c5e2` — opt-in MSP bench sessions and command watchdog.
+2. `b821aed44` — HX711 driver, GPIO resources, calibration and save/readback.
+3. `a0e200236` — production-code host tests, protocol documentation, and CI build matrix.
 
 The original sibling checkout remains detached at the original base, with its pre-existing config checkout and untracked DroneCAN content preserved. The isolated feature worktree is clean.
 
@@ -54,7 +54,7 @@ Commands: see [README.md](README.md). Local WSL host tests and all three build c
 - Six local Microsoft Edge browser tests passed: simulator run, profile editing/saving, exports, reload/history, overlays, tare/calibrate/save, countdown Stop, active hidden-page abort, late main-thread delivery abort, storage failure with in-memory export, graphical dragging, and responsive width at 390 px.
 - Desktop (1440 px) and mobile (390 px) views visually inspected; no horizontal overflow.
 - Production TypeScript/Vite build passed. The charting bundle emits a non-fatal size advisory.
-- Deployment awaits approval to merge the web application PR into main. Automatic approval review rejected a direct default-branch push; Pages is configured. The checklist records this pending step.
+- Deployment awaits testing/validation and a later request to merge the web application PR into main. Automatic approval review rejected a direct default-branch push; Pages is configured. The checklist records this pending step.
 
 ## Pending physical checks
 

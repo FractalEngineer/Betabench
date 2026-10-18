@@ -2,15 +2,17 @@
 
 A browser-based motor and ESC test bench using a Betaflight flight controller.
 
-**[Open Betabench](https://fractalengineer.github.io/Betabench/)** Â· [Implementation checklist](PLAN.md) Â· [Firmware and wiring](firmware/README.md) Â· [MSP extension](firmware/PROTOCOL.md)
+**[Open Betabench](https://fractalengineer.github.io/Betabench/)** · [Implementation checklist](PLAN.md) · [Firmware and wiring](firmware/README.md) · [MSP extension](firmware/PROTOCOL.md)
 
 Deployment is pending approval to merge [PR #1](https://github.com/FractalEngineer/Betabench/pull/1). The implementation and local simulator are ready.
+
+The local test preview is ready. Deployment remains pending testing and validation; the [draft web app PR](https://github.com/FractalEngineer/Betabench/pull/1) is unmerged. No upstream Betaflight PR has been opened.
 
 ## Use
 
 Open the app in desktop Chrome or Edge. Select **Try simulator** to explore without hardware, or **Connect FC** to choose the USB serial port. Close Betaflight Configurator first so the port is available.
 
-Choose MiniQuadTestBench or the 0â†’100â†’0 sweep, select motor outputs, and edit the timeline or segment table. Save a copy to retain custom profiles. Secure the stand, enable the outputs for this run, and press **Run profile**. A three-second countdown precedes playback. Stop is always available while connected.
+Choose MiniQuadTestBench or the 0→100→0 sweep, select motor outputs, and edit the timeline or segment table. Save a copy to retain custom profiles. Secure the stand, enable the outputs for this run, and press **Run profile**. A three-second countdown precedes playback. Stop is always available while connected.
 
 The app requires Betaflight MSP API 1.42+ and conventional DShot150/300/600. Reversible/3D and inverted motor outputs are rejected. It reads the configured FC voltage/current sources; accurate electrical measurements require the FC sensors to be connected and calibrated. Shared current and thrust represent the selected motors together, including board consumption. Optional RPM and ESC temperature depend on configured telemetry support.
 
