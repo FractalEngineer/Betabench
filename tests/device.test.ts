@@ -1,6 +1,11 @@
 import "fake-indexeddb/auto";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { FlightController, SerialLink, Unsupported } from "../src/device";
+import {
+  FlightController,
+  SerialLink,
+  Unsupported,
+  decodeBatteryState,
+} from "../src/device";
 import { MSP, frame, packed } from "../src/protocol";
 function fakePort() {
   let input: ReadableStreamDefaultController<Uint8Array>;
@@ -166,5 +171,52 @@ describe("stock capability discovery", () => {
     });
     await expect(d.tare()).rejects.toThrow("stale");
     expect(d.calibration).toEqual(previous);
+  });
+});
+describe("battery telemetry and reboot", () => {
+  const batteryState = (current: number, voltage: number, drawn = 0) =>
+    packed(11, (v) => {
+      v.setUint8(0, 6);
+      v.setUint16(1, 1500, true);
+      v.setUint8(3, 168);
+      v.setUint16(4, drawn, true);
+      v.setInt16(6, current, true); // 0.01 A steps
+      v.setUint8(8, 0);
+      v.setUint16(9, voltage, true); // 0.01 V steps
+    });
+  it("reads current from byte 6 without mixing in drawn capacity", () => {
+    const { current, voltage } = decodeBatteryState(
+      batteryState(1234, 1680, 5000),
+      1,
+      1,
+    );
+    expect(current).toBeCloseTo(12.34);
+    expect(voltage).toBeCloseTo(16.8);
+    // A byte-5 read would pull in the mAh-drawn high byte (5000 = 0x1388).
+    expect(
+      decodeBatteryState(batteryState(1234, 1680, 5000), 0, 1).current,
+    ).toBeCloseTo(12.34);
+  });
+  it("leaves unconfigured voltage and current sources empty", () => {
+    expect(decodeBatteryState(batteryState(1234, 1680), 0, 0)).toEqual({
+      voltage: undefined,
+      current: undefined,
+    });
+    expect(() => decodeBatteryState(new Uint8Array(4), 1, 1)).toThrow(
+      "Truncated",
+    );
+  });
+  it("reboots through MSP_REBOOT", async () => {
+    const request = vi.fn(
+      async (
+        _command: number,
+        _payload: Uint8Array,
+        _priority: number,
+        _timeoutMs: number,
+      ) => new Uint8Array(),
+    );
+    const d = new FlightController({ request } as unknown as SerialLink);
+    await d.reboot();
+    expect(request.mock.calls.at(-1)![0]).toBe(MSP.REBOOT);
   });
 });

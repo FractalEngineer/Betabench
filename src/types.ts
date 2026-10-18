@@ -1,3 +1,5 @@
+import type { CliTransport } from "./cli";
+
 export type ProfilePoint = {
   id: string;
   timeMs: number;
@@ -69,6 +71,8 @@ export interface BenchDevice {
   begin(): Promise<void>;
   motors(values: number[]): Promise<boolean | void>;
   stop(): Promise<void>;
+  reboot?(): Promise<void>;
+  transport?: CliTransport;
   sample(): Promise<Omit<Sample, "t" | "throttle">>;
   tare(): Promise<void>;
   calibrate(grams: number): Promise<void>;

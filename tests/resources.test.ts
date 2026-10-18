@@ -1,5 +1,5 @@
 import { it, expect } from "vitest";
-import { gpioPin, resourceCli, resourcePads } from "../src/resources";
+import { gpioPin, hx711Pins, resourceCli, resourcePads } from "../src/resources";
 import targets from "../src/targets.json";
 const target = targets.targets.find((t) => t.name === "CLRACINGF4")!;
 const pad = (label: string) => target.pads.find((p) => p.label === label)!;
@@ -52,6 +52,28 @@ serial 1 0 115200 57600 0 115200
   expect(pads.map((p) => p.pin)).toEqual(["B08", "B08", "A04"]);
   expect(resourceCli(pads, pads[0], pads[2])).toBe(
     "resource MOTOR 3 NONE\nresource LED_STRIP 1 NONE\nresource SERIAL_RX 2 NONE\nresource HX711_SCK 1 B08\nresource HX711_DOUT 1 A04\nsave",
+  );
+});
+it("finds the HX711 pins in a detected resource dump", () => {
+  const dump = [
+    "# resource BEEPER 1 B04",
+    "resource BEEPER 1 B04",
+    "resource SERIAL_TX 4 A00",
+    "resource SERIAL_RX 4 A01",
+    "resource HX711_SCK 1 A00",
+    "resource HX711_DOUT 1 A01",
+  ].join("\n");
+  expect(hx711Pins(dump)).toEqual({ sck: "A00", dout: "A01" });
+  expect(
+    hx711Pins("resource HX711_SCK 1 NONE\nresource HX711_DOUT 1 NONE"),
+  ).toEqual({ sck: undefined, dout: undefined });
+});
+it("does not release the HX711 pins it is about to reassign", () => {
+  const pads = resourcePads(
+    "resource HX711_SCK 1 A00\nresource HX711_DOUT 1 A01\nresource SERIAL_TX 4 A00\nresource LED_STRIP 1 A05",
+  );
+  expect(resourceCli(pads, pad("TX4"), pad("RX4"))).toBe(
+    "resource SERIAL_TX 4 NONE\nresource HX711_SCK 1 A00\nresource HX711_DOUT 1 A01\nsave",
   );
 });
 it("validates GPIO input and rejects equal pins after normalization", () => {

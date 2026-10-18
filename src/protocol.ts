@@ -3,6 +3,7 @@ export const MSP = {
   VARIANT: 2,
   VERSION: 3,
   BOARD: 4,
+  REBOOT: 68,
   STATUS: 101,
   MOTOR: 104,
   FEATURE: 36,

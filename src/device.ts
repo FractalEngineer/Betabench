@@ -1,6 +1,7 @@
 import { loadCalibration, persistCalibration } from "./storage";
 import { tareCalibration, weightCalibration } from "./calibration";
 import { MSP, HX, Parser, frame, packed, view } from "./protocol";
+import type { CliTransport } from "./cli";
 import type { BenchDevice, Calibration, Identity, Sample } from "./types";
 
 type Job = {
@@ -23,6 +24,10 @@ export class SerialLink {
   private closed = false;
   private faulted = false;
   private reading?: Promise<void>;
+  // While a CLI session owns the port, raw text replaces MSP request/response
+  // framing; anything sent as an MSP frame would be typed into the CLI instead.
+  private rawSink?: (text: string) => void;
+  private decoder = new TextDecoder();
   onFault: (e: Error) => void = () => {};
   constructor(private port: SerialPort) {}
   async open() {
@@ -40,6 +45,10 @@ export class SerialLink {
         if (done) {
           if (!this.closed) throw Error("Serial port disconnected");
           break;
+        }
+        if (this.rawSink) {
+          this.rawSink(this.decoder.decode(value!, { stream: true }));
+          continue;
         }
         for (const f of this.parser.feed(value!)) {
           if (this.active?.command !== f.command) continue;
@@ -63,6 +72,10 @@ export class SerialLink {
     timeoutMs = 150,
   ) {
     return new Promise<Uint8Array>((resolve, reject) => {
+      if (this.rawSink) {
+        reject(Error("The flight controller CLI is open; close it first"));
+        return;
+      }
       if (this.closed || this.faulted) {
         reject(Error("Serial port closed or failed; reconnect required"));
         return;
@@ -109,9 +122,33 @@ export class SerialLink {
     if (!this.closed) this.onFault(error);
   }
   async emergency(command: number, payload: Uint8Array = new Uint8Array()) {
+    if (this.rawSink) throw Error("The flight controller CLI is open");
     for (const job of this.queue) job.reject(Error("Cancelled by stop"));
     this.queue = [];
     if (!this.closed) await this.writer?.write(frame(command, payload));
+  }
+  private cancel(error: Error) {
+    clearTimeout(this.timer);
+    this.active?.reject(error);
+    this.active = undefined;
+    for (const job of this.queue) job.reject(error);
+    this.queue = [];
+  }
+  beginRaw(sink: (text: string) => void) {
+    this.cancel(Error("Superseded by the CLI session"));
+    this.parser = new Parser();
+    this.decoder = new TextDecoder();
+    this.rawSink = sink;
+  }
+  endRaw() {
+    this.rawSink = undefined;
+    this.decoder = new TextDecoder();
+    this.parser = new Parser();
+  }
+  async write(bytes: Uint8Array) {
+    if (this.closed || this.faulted)
+      throw Error("Serial port closed or failed; reconnect required");
+    await this.writer!.write(bytes);
   }
   async close() {
     this.closed = true;
@@ -246,19 +283,17 @@ export class FlightController implements BenchDevice {
   }
   async sample(): Promise<Omit<Sample, "t" | "throttle">> {
     const data = await this.link.request(MSP.BATTERY);
-    const v = view(data, 11);
     if (++this.telemetryCounter % 5 === 0) {
       const state = await this.link.request(MSP.STATUS);
       if (view(state, 10).getUint32(6, true) & 1)
         throw Error("FC armed during motor test");
       await this.optionalMotorTelemetry();
     }
-    const voltage = this.identity.voltageSource
-      ? v.getUint16(9, true) / 100
-      : undefined;
-    const current = this.identity.currentSource
-      ? v.getInt16(5, true) / 100
-      : undefined;
+    const { voltage, current } = decodeBatteryState(
+      data,
+      this.identity.voltageSource,
+      this.identity.currentSource,
+    );
     const hx = this.identity.hx711
       ? decodeHxSample(await this.link.request(MSP.HX_SAMPLE), this.calibration)
       : {};
@@ -349,11 +384,33 @@ export class FlightController implements BenchDevice {
       throw Error("Calibration save verification failed");
     this.calibration = saved;
   }
+  get transport(): CliTransport {
+    return this.link;
+  }
+  async reboot() {
+    await this.link.request(MSP.REBOOT, new Uint8Array(), 3, 500);
+  }
   async close() {
     await this.stop().catch(() => {});
     await this.link.close();
   }
 }
+// MSP_BATTERY_STATE layout: u8 cell count, u16 capacity (mAh), u8 legacy voltage
+// (0.1 V), u16 mAh drawn, i16 current (0.01 A), u8 state, u16 voltage (0.01 V).
+// Current sits at byte 6, not byte 5 - reading one byte early mixed in the drawn
+// capacity high byte and reported a wildly wrong, far too large current.
+export function decodeBatteryState(
+  data: Uint8Array,
+  voltageSource: number,
+  currentSource: number,
+) {
+  const v = view(data, 11);
+  return {
+    voltage: voltageSource ? v.getUint16(9, true) / 100 : undefined,
+    current: currentSource ? v.getInt16(6, true) / 100 : undefined,
+  };
+}
+
 export function decodeHxSample(data: Uint8Array, calibration?: Calibration) {
   const v = view(data, 18);
   if (data.length !== 18 || data[0] !== 1)
@@ -451,6 +508,75 @@ export class Simulator implements BenchDevice {
   }
   async saveCalibration() {
     this.calibration = { ...this.calibration, saved: true };
+  }
+  get transport(): CliTransport {
+    return this;
+  }
+  private cliSink?: (text: string) => void;
+  private cliEntered = false;
+  private cliInput = "";
+  private cliTimer?: ReturnType<typeof setTimeout>;
+  beginRaw(sink: (text: string) => void) {
+    clearTimeout(this.cliTimer);
+    this.cliSink = sink;
+    this.cliEntered = false;
+    this.cliInput = "";
+    // The real FC waits for a 100 ms idle guard before entering the CLI.
+    this.cliTimer = setTimeout(() => {
+      this.cliEntered = true;
+      this.cliSink?.(
+        "\r\nEntering CLI Mode, type 'exit' to reboot, or 'help'\r\n# ",
+      );
+    }, 30);
+  }
+  endRaw() {
+    clearTimeout(this.cliTimer);
+    this.cliSink = undefined;
+    this.cliEntered = false;
+    this.cliInput = "";
+  }
+  async write(bytes: Uint8Array) {
+    const sink = this.cliSink;
+    if (!sink || !this.cliEntered) return; // '#' handshake bytes are dropped
+    for (const char of new TextDecoder().decode(bytes)) {
+      if (char === "\r" || char === "\n") {
+        const line = this.cliInput;
+        this.cliInput = "";
+        sink(`\r\n${line ? this.cliReply(line) : ""}\r\n# `);
+        if (/^exit\b/i.test(line)) this.cliEntered = false;
+      } else if (char >= " " && char <= "~") {
+        this.cliInput += char;
+        sink(char);
+      }
+    }
+  }
+  private cliReply(command: string) {
+    const head = command.trim().split(/\s+/)[0].toLowerCase();
+    if (head === "save") return "# Simulator: settings saved";
+    if (head === "version")
+      return "# Betaflight / CLRACINGF4 (CLRF) 2026.6.1\r\n# Simulator build";
+    if (head === "status") return `# Simulator: ${this.values.length} motors`;
+    if (head === "resource")
+      return [
+        "resource BEEPER 1 B04",
+        "resource MOTOR 1 B00",
+        "resource MOTOR 2 B01",
+        "resource MOTOR 3 B02",
+        "resource MOTOR 4 B03",
+        "resource SERIAL_TX 1 A09",
+        "resource SERIAL_RX 1 A10",
+        "resource SERIAL_TX 4 A00",
+        "resource SERIAL_RX 4 A01",
+        "resource HX711_SCK 1 A00",
+        "resource HX711_DOUT 1 A01",
+      ].join("\r\n");
+    if (head === "exit") return "### leaving CLI mode, no reboot";
+    if (head === "diff" || head === "dump")
+      return "# Simulator configuration\r\nset gyro_sync_denom = 1";
+    return `###ERROR: unknown command '${head}'`;
+  }
+  async reboot() {
+    await this.stop();
   }
   async close() {
     await this.stop();

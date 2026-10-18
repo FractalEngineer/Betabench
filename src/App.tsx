@@ -16,18 +16,24 @@ import {
   FlaskConical,
   Gauge,
   Moon,
+  Pause,
   Play,
   Plus,
+  Power,
   Radio,
+  RefreshCw,
   Save,
   Scale,
+  Send,
   SlidersHorizontal,
   Sun,
+  Terminal,
   Trash2,
   Unplug,
   Zap,
 } from "lucide-react";
 import type { BenchDevice, Profile, Run, Sample } from "./types";
+import { CliSession } from "./cli";
 import { presets, duplicate, duration, validateProfile } from "./profiles";
 import { FlightController, SerialLink, Simulator } from "./device";
 import { RunController } from "./runner";
@@ -41,8 +47,22 @@ const ResourceSetup = lazy(() =>
 
 const fmt = (v: number | undefined, d = 2) =>
   v === undefined || !Number.isFinite(v) ? "—" : v.toFixed(d);
+const LIVE_WINDOW_MS = 30000;
+const LIVE_LIMIT = 4000;
+type CliLine = { kind: "in" | "out" | "error"; text: string };
+const CLI_LOG_LIMIT = 600;
+// The CLI echoes what we type, so the raw session text is shown as-is, the way a
+// terminal does it.
+function cliLines(text: string): CliLine[] {
+  return text
+    .replaceAll("\r", "")
+    .split("\n")
+    .map((line) => ({ kind: "out" as const, text: line }));
+}
 export default function App() {
-  const [tab, setTab] = useState<"bench" | "history" | "loadcell">("bench");
+  const [tab, setTab] = useState<"bench" | "history" | "loadcell" | "cli">(
+    "bench",
+  );
   const [profiles, setProfiles] = useState<Profile[]>(presets);
   const [profile, setProfile] = useState<Profile>(structuredClone(presets[0]));
   const [device, setDevice] = useState<BenchDevice>();
@@ -57,6 +77,14 @@ export default function App() {
   const [activeRun, setActiveRun] = useState<Run>();
   const [runs, setRuns] = useState<Run[]>([]);
   const [overlays, setOverlays] = useState<string[]>([]);
+  const [live, setLive] = useState<Sample[]>([]);
+  const [held, setHeld] = useState<Sample[]>();
+  const [manual, setManual] = useState<number[]>([]);
+  const [cliLog, setCliLog] = useState<CliLine[]>([]);
+  const [cliInput, setCliInput] = useState("");
+  const [cliHistory, setCliHistory] = useState<string[]>([]);
+  const [cliIndex, setCliIndex] = useState(-1);
+  const [cliOpen, setCliOpen] = useState(false);
   const [selectedMetrics, setSelectedMetrics] = useState<Metric[]>([
     "current",
     "voltage",
@@ -76,6 +104,11 @@ export default function App() {
   const deviceRef = useRef<BenchDevice | undefined>(undefined);
   const runningRef = useRef(false);
   const busyRef = useRef(false);
+  const liveStart = useRef<number | undefined>(undefined);
+  const manualRef = useRef<number[]>([]);
+  const manualArmed = useRef(false);
+  const manualChain = useRef<Promise<void>>(Promise.resolve());
+  const cliRef = useRef<CliSession | undefined>(undefined);
   const input = useRef<HTMLInputElement>(null);
   const renderAt = useRef(0);
   async function refresh() {
@@ -114,14 +147,41 @@ export default function App() {
     };
   }, []);
   useEffect(() => {
+    const values = Array(device?.identity.motorCount ?? 0).fill(0);
+    manualRef.current = values;
+    setManual(values);
+    setLive([]);
+    setHeld(undefined);
+    liveStart.current = undefined;
+    manualArmed.current = false;
+    cliRef.current = undefined;
+    setCliOpen(false);
     if (!device) return;
     let cancelled = false;
     const poll = async () => {
       while (!cancelled) {
-        if (!runningRef.current && !busyRef.current) {
+        if (!runningRef.current && !busyRef.current && !cliRef.current) {
           try {
             const s = await device.sample();
-            if (!cancelled && !runningRef.current) setSample(s);
+            if (!cancelled && !runningRef.current) {
+              setSample({
+                ...s,
+                throttle: Math.max(0, ...manualRef.current),
+              });
+              const now = performance.now();
+              liveStart.current ??= now;
+              const t = now - liveStart.current;
+              setLive((previous) => {
+                const next = [...previous, { ...s, t, throttle: 0 }];
+                const cutoff = t - LIVE_WINDOW_MS;
+                let drop = 0;
+                while (drop < next.length && next[drop].t < cutoff) drop++;
+                if (drop) next.splice(0, drop);
+                return next.length > LIVE_LIMIT
+                  ? next.slice(next.length - LIVE_LIMIT)
+                  : next;
+              });
+            }
           } catch (e) {
             if (!cancelled) {
               setError(String(e));
@@ -179,6 +239,8 @@ export default function App() {
       link.onFault = (e) => {
         setError(e.message);
         setEnabled(false);
+        cliRef.current = undefined;
+        setCliOpen(false);
         if (controller.current) void controller.current.stop(e.message);
       };
       setDevice(d);
@@ -187,6 +249,7 @@ export default function App() {
   }
   async function disconnect() {
     await action(async () => {
+      if (cliRef.current) await closeCli();
       if (controller.current)
         await controller.current.stop("Disconnected by user");
       await device?.close();
@@ -198,13 +261,20 @@ export default function App() {
     });
   }
   async function start() {
-    if (!device || !enabled || runningRef.current) return;
+    if (!device || !enabled || runningRef.current || cliRef.current) return;
     setError("");
     try {
       validateProfile(profile);
+      // Recorded runs need every output stopped before the controller arms.
+      if (manualArmed.current || manualRef.current.some((value) => value > 0))
+        await releaseManual();
       runningRef.current = true;
       setRunning(true);
       setTab("bench");
+      setLive([]);
+      setHeld(undefined);
+      liveStart.current = undefined;
+      manualArmed.current = false;
       const c = new RunController(
         device,
         profile,
@@ -225,6 +295,7 @@ export default function App() {
             runningRef.current = false;
             setRunning(false);
             setEnabled(false);
+            setHeld([...run.samples]);
           }
         },
       );
@@ -244,7 +315,7 @@ export default function App() {
       setRuns(await store.runs());
     } else
       await action(async () => {
-        await device?.stop();
+        await releaseManual();
         setEnabled(false);
         setStatus("Outputs stopped");
       });
@@ -284,6 +355,194 @@ export default function App() {
       setStatus("Imported successfully");
     });
   }
+  // Slider writes are queued so arming always precedes the first motor value
+  // and a released session can never be followed by a stale write.
+  function queueManual(task: () => Promise<void>) {
+    manualChain.current = manualChain.current
+      .then(task)
+      .catch((e) => setError(String(e)));
+    return manualChain.current;
+  }
+  function setManualMotor(index: number, percent: number) {
+    if (!device || !enabled || running) return;
+    setError("");
+    const target = device;
+    const next = manualRef.current.map((value, i) =>
+      i === index ? percent : value,
+    );
+    manualRef.current = next;
+    setManual(next);
+    const outputs = next.map((value) =>
+      value <= 0 ? 1000 : 1001 + Math.round((value * 999) / 100),
+    );
+    void queueManual(async () => {
+      if (target !== deviceRef.current) return;
+      if (!manualArmed.current) {
+        await target.begin();
+        manualArmed.current = true;
+      }
+      await target.motors(outputs);
+      setStatus(
+        percent > 0
+          ? `Manual M${index + 1} at ${percent}%`
+          : `Manual M${index + 1} stopped`,
+      );
+    });
+  }
+  async function releaseManual() {
+    manualArmed.current = false;
+    const zeroed = manualRef.current.map(() => 0);
+    manualRef.current = zeroed;
+    setManual(zeroed);
+    const target = device;
+    await queueManual(async () => {
+      if (target && target === deviceRef.current) await target.stop();
+    });
+  }
+  function toggleChart() {
+    if (running) return;
+    if (held) {
+      setHeld(undefined);
+      setLive([]);
+      liveStart.current = undefined;
+      setStatus("Live plotting resumed");
+      return;
+    }
+    setHeld([...live]);
+    setStatus("Plot held");
+  }
+  function appendCli(text: string) {
+    const lines = cliLines(text);
+    setCliLog((log) => [...log, ...lines].slice(-CLI_LOG_LIMIT));
+  }
+  async function openCli() {
+    if (!device?.transport || cliRef.current || running) return;
+    setError("");
+    setBusy(true);
+    busyRef.current = true;
+    try {
+      // Motors and the CLI cannot share the port, so release everything first.
+      await releaseManual();
+      setEnabled(false);
+      const session = new CliSession(device.transport);
+      const banner = await session.open();
+      cliRef.current = session;
+      setCliOpen(true);
+      appendCli(banner);
+      setStatus("CLI open — telemetry paused");
+    } catch (e) {
+      setCliLog((log) => [
+        ...log,
+        { kind: "error", text: e instanceof Error ? e.message : String(e) },
+      ]);
+    } finally {
+      setBusy(false);
+      busyRef.current = false;
+    }
+  }
+  async function closeCli() {
+    const session = cliRef.current;
+    if (!session) return;
+    setBusy(true);
+    busyRef.current = true;
+    try {
+      appendCli(await session.close());
+      setStatus("CLI closed — the FC stays disarmed until it reboots");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      cliRef.current = undefined;
+      setCliOpen(false);
+      setBusy(false);
+      busyRef.current = false;
+    }
+  }
+  async function submitCli(command: string) {
+    const session = cliRef.current;
+    const line = command.trim();
+    if (!session || !line || busy) return;
+    setCliInput("");
+    setCliHistory((history) =>
+      history.at(-1) === line ? history : [...history, line],
+    );
+    setCliIndex(-1);
+    setBusy(true);
+    try {
+      appendCli(await session.run(line));
+      setStatus(`CLI: ${line}`);
+    } catch (e) {
+      setCliLog((log) => [
+        ...log,
+        { kind: "error", text: e instanceof Error ? e.message : String(e) },
+      ]);
+    } finally {
+      setBusy(false);
+    }
+  }
+  // Runs CLI work in the open session when there is one, otherwise opens a
+  // temporary session and closes it again (which is what stops the FC's CLI).
+  async function withCliSession<T>(run: (session: CliSession) => Promise<T>) {
+    const transport = device?.transport;
+    if (!transport) throw Error("Connect a flight controller first");
+    const open = cliRef.current;
+    if (open) return run(open);
+    setBusy(true);
+    busyRef.current = true;
+    try {
+      await releaseManual();
+      setEnabled(false);
+      const session = new CliSession(transport);
+      await session.open();
+      try {
+        return await run(session);
+      } finally {
+        await session.close();
+      }
+    } finally {
+      setBusy(false);
+      busyRef.current = false;
+    }
+  }
+  async function readFcResources() {
+    return withCliSession((session) => session.run("resource"));
+  }
+  async function writeResourceCli(commands: string[]) {
+    // The CLI's own "save" reboots the FC, which would drop the port mid-flow.
+    // Persist with "save noreboot" and let the operator reboot deliberately.
+    const lines = commands.map((line) =>
+      line.trim() === "save" ? "save noreboot" : line,
+    );
+    try {
+      await withCliSession(async (session) => {
+        for (const line of lines) await session.run(line);
+      });
+      setStatus("HX711 resources written. Reboot the FC to apply them.");
+    } catch (e) {
+      setError(String(e));
+      throw e;
+    }
+  }
+  async function rebootFc() {
+    if (!device?.reboot || busy || cliRef.current) return;
+    if (
+      !window.confirm(
+        "Reboot the flight controller? The USB connection will drop.",
+      )
+    )
+      return;
+    setBusy(true);
+    busyRef.current = true;
+    try {
+      await device.reboot();
+      setStatus("Reboot requested — reconnect when the FC is back");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+      busyRef.current = false;
+    }
+    await disconnect();
+  }
   const samples = activeRun?.samples ?? [];
   const elapsed = samples.at(-1)?.t ?? 0;
   const rate =
@@ -303,6 +562,17 @@ export default function App() {
     sample.power > 0
       ? sample.thrustG / sample.power
       : undefined;
+  // The graph follows live telemetry until a run resets it, then holds the
+  // recorded sequence until the user resumes.
+  const chartSamples = held ?? (running ? samples : live);
+  const chartName =
+    running || (held !== undefined && activeRun)
+      ? identity?.simulated
+        ? "Simulator"
+        : "Run"
+      : "Live";
+  // Anything that talks to the FC has to wait for an open CLI session to close.
+  const fcLocked = busy || cliOpen;
   function switchTab(value: typeof tab) {
     setTab(value);
     if (value === "history" && !runningRef.current)
@@ -345,6 +615,7 @@ export default function App() {
               ["bench", "Test bench", <SlidersHorizontal size={17} />],
               ["history", "Run history", <Activity size={17} />],
               ["loadcell", "Load cell", <Scale size={17} />],
+              ["cli", "CLI", <Terminal size={17} />],
             ] as const
           ).map(([key, label, icon]) => (
             <button
@@ -376,7 +647,9 @@ export default function App() {
               ? "Test bench"
               : tab === "history"
                 ? "Run history"
-                : "Load cell"}
+                : tab === "loadcell"
+                  ? "Load cell"
+                  : "Betaflight CLI"}
           </h1>
           <div className="actions">
             <span className="pill">
@@ -455,6 +728,12 @@ export default function App() {
             <div className="notice warning">
               Motor output persists after USB or browser loss. Keep a physical
               power cutoff available.
+            </div>
+          )}
+          {cliOpen && (
+            <div className="notice warning">
+              Flight controller CLI is open. Telemetry and motor commands are
+              paused until you close the session.
             </div>
           )}
           {tab === "bench" && (
@@ -567,18 +846,28 @@ export default function App() {
                     <input
                       type="checkbox"
                       checked={enabled}
-                      disabled={!device || running || busy}
-                      onChange={(e) => setEnabled(e.target.checked)}
+                      disabled={!device || running || fcLocked}
+                      onChange={(e) => {
+                        setEnabled(e.target.checked);
+                        if (!e.target.checked && manualArmed.current)
+                          void releaseManual();
+                      }}
                     />
                     <span>
                       Bench is secured and ready.
-                      <small>Enable motor outputs for this run.</small>
+                      <small>
+                        Enable outputs for a run and the manual sliders.
+                      </small>
                     </span>
                   </label>
                   <button
                     className="primary run-button"
                     disabled={
-                      !device || !enabled || !selected.length || running || busy
+                      !device ||
+                      !enabled ||
+                      !selected.length ||
+                      running ||
+                      fcLocked
                     }
                     onClick={() => void start()}
                   >
@@ -599,6 +888,44 @@ export default function App() {
                   </p>
                 </section>
               </div>
+              <section className="panel manual-panel">
+                <div className="section-heading">
+                  <h2>Manual motor test</h2>
+                  <span>
+                    {!device
+                      ? "Connect a flight controller"
+                      : enabled
+                        ? "Sliders drive the motors directly"
+                        : "Enable outputs to drive the motors"}
+                  </span>
+                </div>
+                {device ? (
+                  <div className="motor-sliders">
+                    {manual.map((value, i) => (
+                      <label className="motor-slider" key={i}>
+                        <span>M{i + 1}</span>
+                        <input
+                          type="range"
+                          min="0"
+                          max="100"
+                          step="1"
+                          value={value}
+                          disabled={!enabled || running}
+                          aria-label={`Motor ${i + 1} throttle`}
+                          onChange={(e) =>
+                            void setManualMotor(i, Number(e.target.value))
+                          }
+                        />
+                        <output>{value}%</output>
+                      </label>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="subtle">
+                    Connect a flight controller to drive individual motors.
+                  </p>
+                )}
+              </section>
               <section className="panel telemetry-panel">
                 <div className="section-heading">
                   <h2>Measurements</h2>
@@ -643,14 +970,32 @@ export default function App() {
                     onChange={setSelectedMetrics}
                     unit={loadUnit}
                   />
+                  <div className="chart-control">
+                    <span className="chart-state">
+                      {running ? "REC" : held ? "HOLD" : "LIVE"}
+                    </span>
+                    <button
+                      className="icon"
+                      disabled={running}
+                      aria-pressed={held !== undefined}
+                      aria-label={held ? "Run the plot" : "Stop the plot"}
+                      title={
+                        running
+                          ? "The plot follows the active run"
+                          : held
+                            ? "Resume live plotting and clear the held trace"
+                            : "Freeze the plot; the motors keep their values"
+                      }
+                      onClick={toggleChart}
+                    >
+                      {held ? <Play size={15} /> : <Pause size={15} />}
+                      {held ? "Run" : "Stop"}
+                    </button>
+                  </div>
                 </div>
                 <MeasurementsChart
                   series={[
-                    {
-                      id: "live",
-                      name: identity?.simulated ? "Simulator" : "Run",
-                      samples: samples.slice(-3000),
-                    },
+                    { id: "live", name: chartName, samples: chartSamples },
                   ]}
                   selected={selectedMetrics}
                   unit={loadUnit}
@@ -846,7 +1191,7 @@ export default function App() {
                       <p>Remove the load and let the stand settle.</p>
                     </div>
                     <button
-                      disabled={!identity?.hx711 || running || busy}
+                      disabled={!identity?.hx711 || running || fcLocked}
                       onClick={() =>
                         void action(async () => {
                           await device!.tare();
@@ -870,7 +1215,7 @@ export default function App() {
                           value={Number(
                             (mass * loadUnits[loadUnit].factor).toPrecision(8),
                           )}
-                          disabled={running || busy}
+                          disabled={running || fcLocked}
                           onChange={(e) =>
                             setMass(
                               Number(e.target.value) /
@@ -883,7 +1228,7 @@ export default function App() {
                     </div>
                     <button
                       disabled={
-                        !identity?.hx711 || running || busy || mass <= 0
+                        !identity?.hx711 || running || fcLocked || mass <= 0
                       }
                       onClick={() =>
                         void action(async () => {
@@ -902,7 +1247,7 @@ export default function App() {
                       <p>Stored in this browser for this FC. Logs use grams.</p>
                     </div>
                     <button
-                      disabled={!identity?.hx711 || running || busy}
+                      disabled={!identity?.hx711 || running || fcLocked}
                       onClick={() =>
                         void action(async () => {
                           await device!.saveCalibration();
@@ -942,9 +1287,150 @@ export default function App() {
               <Suspense
                 fallback={<section className="panel">Loading targets…</section>}
               >
-                <ResourceSetup />
+                <ResourceSetup
+                  writeCli={device?.transport ? writeResourceCli : undefined}
+                  detect={device?.transport ? readFcResources : undefined}
+                />
               </Suspense>
             </div>
+          )}
+          {tab === "cli" && (
+            <section className="panel cli-panel">
+              <div className="section-heading">
+                <h2>Command console</h2>
+                <span className="pill">
+                  {!device
+                    ? "Disconnected"
+                    : cliOpen
+                      ? "CLI OPEN"
+                      : identity?.simulated
+                        ? "Simulator"
+                        : "Connected"}
+                </span>
+                <div className="actions">
+                  <button
+                    className={cliOpen ? "" : "primary"}
+                    disabled={
+                      cliOpen
+                        ? busy
+                        : !device?.transport || running || busy
+                    }
+                    onClick={() =>
+                      cliOpen ? void closeCli() : void openCli()
+                    }
+                  >
+                    {cliOpen ? <Power size={14} /> : <Terminal size={14} />}
+                    {cliOpen ? "Close CLI" : "Open CLI"}
+                  </button>
+                  <button
+                    disabled={
+                      !device?.reboot || running || busy || cliOpen
+                    }
+                    onClick={() => void rebootFc()}
+                  >
+                    <RefreshCw size={14} /> Reboot FC
+                  </button>
+                  <button
+                    disabled={!cliLog.length || busy}
+                    onClick={() => setCliLog([])}
+                  >
+                    <Trash2 size={14} /> Clear
+                  </button>
+                </div>
+              </div>
+              {!device ? (
+                <p className="subtle">
+                  Connect a flight controller to open its CLI.
+                </p>
+              ) : (
+                <>
+                  {!cliOpen && (
+                    <p className="subtle">
+                      Open a CLI session to run Betaflight commands over MSP,
+                      the same way the Configurator's CLI tab does. The FC
+                      pauses telemetry and motor control while the session is
+                      open, and arming stays disabled until it reboots.
+                    </p>
+                  )}
+                  <div className="cli-quick">
+                    {["version", "status", "diff", "dump"].map((command) => (
+                      <button
+                        key={command}
+                        disabled={busy || !cliOpen}
+                        onClick={() => void submitCli(command)}
+                      >
+                        {command}
+                      </button>
+                    ))}
+                  </div>
+                  <div
+                    className="cli-output"
+                    role="log"
+                    aria-label="CLI output"
+                  >
+                    {cliLog.length ? (
+                      cliLog.map((line, index) => (
+                        <div key={index} className={`cli-${line.kind}`}>
+                          {line.text}
+                        </div>
+                      ))
+                    ) : (
+                      <div className="cli-out">…</div>
+                    )}
+                  </div>
+                  <form
+                    className="cli-input"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void submitCli(cliInput);
+                    }}
+                  >
+                    <input
+                      aria-label="CLI command"
+                      value={cliInput}
+                      autoComplete="off"
+                      spellCheck={false}
+                      maxLength={124}
+                      disabled={busy || !cliOpen}
+                      placeholder={
+                        cliOpen
+                          ? "resource MOTOR 1 NONE"
+                          : "Open the CLI session to type commands"
+                      }
+                      onChange={(event) => setCliInput(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key !== "ArrowUp" && event.key !== "ArrowDown")
+                          return;
+                        event.preventDefault();
+                        if (!cliHistory.length) return;
+                        const next =
+                          event.key === "ArrowUp"
+                            ? Math.min(cliIndex + 1, cliHistory.length - 1)
+                            : cliIndex - 1;
+                        setCliIndex(next);
+                        setCliInput(
+                          next < 0
+                            ? ""
+                            : cliHistory[cliHistory.length - 1 - next],
+                        );
+                      }}
+                    />
+                    <button
+                      className="primary"
+                      type="submit"
+                      disabled={busy || !cliOpen || !cliInput.trim()}
+                    >
+                      <Send size={14} /> Send
+                    </button>
+                  </form>
+                  <p className="subtle">
+                    {cliOpen
+                      ? "Save persists settings without rebooting; press Reboot FC when you are ready to apply them."
+                      : `Firmware CLI over MSP. ${identity?.name ?? "The FC"} is not in CLI mode; telemetry and motor control run normally.`}
+                  </p>
+                </>
+              )}
+            </section>
           )}
           <input
             ref={input}

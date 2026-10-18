@@ -17,6 +17,10 @@ Open the app in desktop Chrome or Edge. Select **Try simulator** to explore with
 
 Choose MiniQuadTestBench or the 0→100→0 sweep from the profile dropdown. Rename it in that same field, edit the timeline or point table, and select motor outputs. Save a copy to retain custom profiles. Secure the stand, enable the outputs for this run, and press **Run profile**. A three-second countdown precedes playback. Stop is always available while connected.
 
+The measurements graph plots live telemetry as soon as a device is connected. Starting a run clears it and plots the recorded sequence; when the run ends the trace holds until you press **Run** on the graph. **Stop** freezes the trace without touching the motors, like an oscilloscope. **Manual motor test** drives each motor with its own slider while outputs are enabled; a slider holds its value until you change it or press **STOP ALL MOTORS**.
+
+**CLI** opens a real Betaflight CLI session over the same USB connection, the way Configurator's CLI tab does, so you can read `diff`/`dump`, change settings, and save without leaving the browser. The FC pauses telemetry and motor control while the session is open, and arming stays disabled until it reboots.
+
 The app requires Betaflight MSP API 1.42+ and conventional DShot150/300/600. Reversible/3D and inverted motor outputs are rejected. It reads the configured FC voltage/current sources; accurate electrical measurements require the FC sensors to be connected and calibrated. Shared current and thrust represent the selected motors together, including board consumption. Optional RPM and ESC temperature depend on configured telemetry support.
 
 **Betaflight retains its last motor-test throttle after a browser crash or lost USB connection.** Keep a physical power cutoff available. Browser scheduling targets 50 Hz and is not a real-time control guarantee; measured rate and maximum telemetry gap appear in the UI. Hidden pages, command delays, stale telemetry, serial failures, and storage failures abort a run. Reconnection never resumes it.
@@ -37,7 +41,7 @@ _Simulator load-cell setup with a manually selected target; no hardware connecte
 
 Build the optional firmware with `USE_HX711`, connect an HX711 to free GPIO resources, then use **Load cell** to tare the empty stand, enter a known mass in grams, calibrate, and save in this browser for this FC UID. Capture needs stopped motors and stable samples. GPIO assignments alone are stored on the FC. Calibration and logs can be exported with run JSON.
 
-Search for and explicitly select a target, then choose repurposed pads to generate resource CLI commands; no target is preselected. The helper uses the selected target configuration to release every mapped resource on the two GPIOs, then assigns HX711 clock/data and saves. Motor, servo, LED, beeper, PINIO, ADC and bus resources are supported; **Custom GPIO…** accepts a GPIO directly. No port-assignment paste is required and no serial/protocol settings are changed. Custom supports resource dumps from remapped FCs. CLRACINGF4 can use TX4/PA0 for clock and RX4/PA1 for data, with USB for MSP. Pins are assigned through normal Betaflight CLI resources with Save/Reboot, without changing the board target. See the [firmware guide](firmware/README.md) for signal voltage, complete commands, restoration, and build instructions.
+Press **Detect** to read the FC's current assignments, including any HX711 pins it already has, then reuse or change them. Otherwise search for and explicitly select a target and choose repurposed pads; no target is preselected. The helper uses the selected target configuration to release every mapped resource on the two GPIOs, then assigns HX711 clock/data and saves. Motor, servo, LED, beeper, PINIO, ADC and bus resources are supported; **Custom GPIO…** accepts a GPIO directly. No port-assignment paste is required and no serial/protocol settings are changed. Custom supports resource dumps from remapped FCs. CLRACINGF4 can use TX4/PA0 for clock and RX4/PA1 for data, with USB for MSP. Copy the commands into Configurator, or press **Write to FC** to run them in a CLI session and save; reboot before the new pins are used. Pins are assigned through normal Betaflight CLI resources without changing the board target. See the [firmware guide](firmware/README.md) for signal voltage, complete commands, restoration, and build instructions.
 
 ## Development
 
@@ -63,9 +67,9 @@ python scripts/test_update_targets.py
 
 The deployment workflow runs unit tests and the production build on pull requests, and deploys `main` through GitHub Pages. Source and the lockfile are tracked; `dist/`, dependencies, build tools, and the isolated firmware worktree are ignored.
 
-## Validation limits
+## Validation
 
-Software simulation and firmware compilation do not verify the physical stand, current-sensor calibration, load-cell wiring, electrical noise, propeller restraint, or actual USB behavior on an FC. Those checks remain explicit pending items in [PLAN.md](PLAN.md).
+The web app and the `USE_HX711` firmware build have been exercised together on physical hardware, including load-cell calibration. Browser flows stay covered by the unit and Edge test suites.
 
 ## Attribution and licensing
 

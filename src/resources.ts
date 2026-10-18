@@ -44,14 +44,31 @@ export function resourcePads(text: string): Pad[] {
   return [...assignments.values()];
 }
 
+// Reads the current HX711 pins out of a `resource` dump so a detected FC can be
+// re-assigned or verified without guessing the board target.
+export function hx711Pins(text: string) {
+  const pads = resourcePads(text);
+  return {
+    sck: pads.find((p) => p.resource === "HX711_SCK")?.pin,
+    dout: pads.find((p) => p.resource === "HX711_DOUT")?.pin,
+  };
+}
+
 export function resourceCli(pads: Pad[], sck: Pad, dout: Pad) {
   const clockPin = gpioPin(sck.pin),
     dataPin = gpioPin(dout.pin);
   if (clockPin === dataPin) throw Error("Choose different GPIO pads");
   // GPIO remapping needs only resource commands. Removing a peripheral's pin
   // assignment frees that GPIO without changing its protocol or port settings.
+  // Re-assigning HX711_SCK/DOUT overwrites its own single entry, so releasing
+  // those two would only add noise to a re-detected dump.
   const release = pads
-    .filter((p) => p.pin === clockPin || p.pin === dataPin)
+    .filter(
+      (p) =>
+        (p.pin === clockPin || p.pin === dataPin) &&
+        p.resource !== "HX711_SCK" &&
+        p.resource !== "HX711_DOUT",
+    )
     .map((p) => `resource ${p.resource} ${p.index} NONE`);
   return [
     ...new Set(release),

@@ -1,9 +1,16 @@
 import { useEffect, useState } from "react";
+import { Search, Upload } from "lucide-react";
 import { ComboBox } from "./ComboBox";
 import data from "./targets.json";
-import { resourceCli, resourcePads, type Pad } from "./resources";
+import { hx711Pins, resourceCli, resourcePads, type Pad } from "./resources";
 
-export function ResourceSetup() {
+export function ResourceSetup({
+  writeCli,
+  detect,
+}: {
+  writeCli?: (lines: string[]) => Promise<void>;
+  detect?: () => Promise<string>;
+}) {
   const [name, setName] = useState("");
   const [query, setQuery] = useState("");
   const [sckKey, setSck] = useState("");
@@ -12,8 +19,15 @@ export function ResourceSetup() {
   const [customDout, setCustomDout] = useState("");
   const [customResources, setCustomResources] = useState("");
   const [copied, setCopied] = useState(false);
+  const [writing, setWriting] = useState(false);
+  const [writeStatus, setWriteStatus] = useState("");
+  const [detecting, setDetecting] = useState(false);
+  const [detectStatus, setDetectStatus] = useState("");
   useEffect(
-    () => setCopied(false),
+    () => {
+      setCopied(false);
+      setWriteStatus("");
+    },
     [name, sckKey, doutKey, customSck, customDout, customResources],
   );
   const target = data.targets.find((t) => t.name === name);
@@ -47,6 +61,32 @@ export function ResourceSetup() {
     setSck(clock?.label ?? "");
     setDout(input?.label ?? "");
   }
+  async function runDetect() {
+    if (!detect) return;
+    setDetecting(true);
+    setDetectStatus("");
+    try {
+      const text = await detect();
+      const pads = resourcePads(text);
+      if (!pads.length)
+        throw Error("The FC did not report any resource assignments");
+      const pins = hx711Pins(text);
+      setCustomResources(text);
+      setName("custom");
+      setQuery("Custom / current resource dump");
+      setCustomSck(pins.sck ?? "");
+      setCustomDout(pins.dout ?? "");
+      setDetectStatus(
+        pins.sck || pins.dout
+          ? `HX711 already assigned: clock ${pins.sck ?? "—"}, data ${pins.dout ?? "—"}. Writing again keeps these pins.`
+          : `Read ${pads.length} resource assignments. HX711_SCK and HX711_DOUT are not assigned yet, so pick the two pads to use.`,
+      );
+    } catch (e) {
+      setDetectStatus(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDetecting(false);
+    }
+  }
   let cli = "",
     error = "";
   if (name)
@@ -62,23 +102,34 @@ export function ResourceSetup() {
       </div>
       <div className="field-label">
         <span>Target</span>
-        <ComboBox
-          label="Flight controller target"
-          value={query}
-          selectedId={name}
-          options={[
-            ...data.targets.map((t) => ({ id: t.name, label: t.name })),
-            { id: "custom", label: "Custom / current resource dump" },
-          ]}
-          placeholder="Search targets…"
-          onChange={(value) => {
-            setQuery(value);
-            setName("");
-            setSck("");
-            setDout("");
-          }}
-          onSelect={selectTarget}
-        />
+        <div className="target-row">
+          <ComboBox
+            label="Flight controller target"
+            value={query}
+            selectedId={name}
+            options={[
+              ...data.targets.map((t) => ({ id: t.name, label: t.name })),
+              { id: "custom", label: "Custom / current resource dump" },
+            ]}
+            placeholder="Search targets…"
+            onChange={(value) => {
+              setQuery(value);
+              setName("");
+              setSck("");
+              setDout("");
+            }}
+            onSelect={selectTarget}
+          />
+          <button
+            type="button"
+            disabled={!detect || detecting}
+            title="Read the current resource assignments from the flight controller"
+            onClick={() => void runDetect()}
+          >
+            <Search size={14} /> {detecting ? "Detecting…" : "Detect"}
+          </button>
+        </div>
+        {detectStatus && <p className="status">{detectStatus}</p>}
       </div>
       {!name ? (
         <p className="subtle">
@@ -196,20 +247,51 @@ export function ResourceSetup() {
           ) : (
             <>
               <pre data-testid="resource-cli">{cli}</pre>
-              <button
-                onClick={() =>
-                  void navigator.clipboard
-                    .writeText(cli)
-                    .then(() => setCopied(true))
-                }
-              >
-                {copied ? "Copied" : "Copy CLI"}
-              </button>
+              <div className="actions">
+                <button
+                  onClick={() =>
+                    void navigator.clipboard
+                      .writeText(cli)
+                      .then(() => setCopied(true))
+                  }
+                >
+                  {copied ? "Copied" : "Copy CLI"}
+                </button>
+                {writeCli && (
+                  <button
+                    className="primary"
+                    disabled={writing}
+                    onClick={() =>
+                      void (async () => {
+                        if (!writeCli) return;
+                        setWriting(true);
+                        setWriteStatus("");
+                        try {
+                          await writeCli(cli.split("\n"));
+                          setWriteStatus(
+                            "Written and saved. Reboot the FC to apply the new pins.",
+                          );
+                        } catch (e) {
+                          setWriteStatus(
+                            e instanceof Error ? e.message : String(e),
+                          );
+                        } finally {
+                          setWriting(false);
+                        }
+                      })()
+                    }
+                  >
+                    <Upload size={14} /> {writing ? "Writing…" : "Write to FC"}
+                  </button>
+                )}
+              </div>
+              {writeStatus && <p className="status">{writeStatus}</p>}
             </>
           )}
           <p className="subtle">
-            Save reboots the FC. Target mappings: {data.revision.slice(0, 8)}.
-            Use Custom to match an existing resource remap.
+            Target mappings: {data.revision.slice(0, 8)}. Use Custom to match
+            an existing resource remap. Reboot the FC after writing or pasting
+            before the new pins are used.
           </p>
         </>
       )}

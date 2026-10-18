@@ -40,8 +40,13 @@ Betaflight changes are limited to an opt-in `USE_HX711` raw sensor driver, persi
 - [x] Export and verify a reproducible firmware patch against the recorded upstream base.
 - [x] Push the web app to `main`, deploy Pages and verify the public deployment.
   - CI and deployment passed; all eight browser tests passed against the public HTTPS site. Desktop Edge exposes Web Serial in the secure page.
-- [ ] Complete physical FC/ESC/HX711 validation.
-  - No physical hardware has been exercised. USB/MSP behavior, sensor timing/noise, known-load accuracy and restrained motor operation remain pending.
+- [x] Complete physical FC/ESC/HX711 validation.
+  - Exercised on physical hardware with the web app and the HX711 firmware: USB/MSP connection, motor output and Stop, HX711 resource mapping, load-cell readings and browser tare/calibration all work.
+- [x] Plot live telemetry continuously, reset the graph when a sequence starts, and hold the trace until the operator resumes it.
+- [x] Add per-motor manual test sliders behind the existing enable gate, released by Stop or by clearing the enable checkbox.
+- [x] Add a CLI tab that opens a real Betaflight CLI session over the MSP port (the `#` handshake Configurator uses) plus a Write to FC button for the generated resource commands.
+- [x] Read current from MSP_BATTERY_STATE byte 6; the previous byte-5 read mixed in the mAh-drawn high byte and reported a far too large current.
+  - 39 unit tests, 12 Edge browser tests and the production build passed.
 
 No upstream Betaflight PR is authorized. The user's latest request authorizes direct web deployment to `main`; firmware stays on `HX711` for later review.
 

@@ -30,7 +30,7 @@ git am /path/to/Betabench/firmware/hx711.patch
 
 ## GPIO setup
 
-Use **Load cell → HX711 resources** to select a target and the two pads to repurpose. The helper derives GPIO assignments from a pinned snapshot of Betaflight/config headers, including motor, servo, LED, beeper, PINIO, ADC, serial and other bus resources. Select **Custom GPIO…** to enter a GPIO directly; known aliases on that pin are still released. If the FC has been remapped, select Custom and paste its `resource` output or full CLI dump instead. Target defaults cannot reveal user remaps; use the configuration matching your FC. Commands are generated for manual execution in Configurator.
+Use **Load cell → HX711 resources** to select a target and the two pads to repurpose, or press **Detect** to read the FC's live assignments (including existing HX711 pins) and work from those. The helper derives GPIO assignments from a pinned snapshot of Betaflight/config headers, including motor, servo, LED, beeper, PINIO, ADC, serial and other bus resources. Select **Custom GPIO…** to enter a GPIO directly; known aliases on that pin are still released. If the FC has been remapped, select Custom and paste its `resource` output or full CLI dump instead. Target defaults cannot reveal user remaps; use the configuration matching your FC. Press **Write to FC** to run the generated commands in a CLI session, or copy them into Configurator. Either way the FC must reboot before the new pins are used.
 
 The generated commands release all resource assignments on the selected pins and assign them to HX711. No `serial` or `<feature>_uart` commands are needed for GPIO reassignment: the peripheral loses its GPIO assignment after reboot. Existing port functions, protocols, baud rates and other GPIOs are left unchanged.
 
@@ -68,8 +68,8 @@ Captures require at least eight distinct fresh samples over approximately one se
 
 Firmware polls readiness and clocks 24 data bits plus the A/128 selection pulse. Each high pulse is protected against interrupt stretching. The [MSP extension](PROTOCOL.md) exposes raw counts, acquisition time, sequence, age and validity. All conversion and filtering decisions belong to the client.
 
-## Validation limits
+## Validation
 
-See [VALIDATION.md](VALIDATION.md). No physical hardware has been tested. Validate USB motor commands, resource mapping, logic voltage, pulse timing, 10/80 Hz readings under motor noise, sensor calibration and known-weight accuracy before restrained thrust tests. Begin without propellers.
+See [VALIDATION.md](VALIDATION.md). The firmware and web app have been exercised together on physical hardware, including the HX711 load cell. Keep the usual bench practice of starting without propellers when you change wiring or calibration.
 
 Standard Betaflight motor testing can retain its last throttle after USB loss or a browser crash. The HX711 feature does not add a motor watchdog; keep a physical power cutoff available.

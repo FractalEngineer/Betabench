@@ -255,6 +255,9 @@ main {
 .section-heading > button {
   margin-left: auto;
 }
+.section-heading > .actions {
+  margin-left: auto;
+}
 .notice {
   border: 1px solid var(--border);
   padding: 12px;
@@ -521,6 +524,86 @@ main {
   min-width: 0;
   font-size: 11px;
 }
+.chart-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+.chart-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.chart-state {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 34px;
+  text-align: right;
+}
+.motor-sliders {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
+  gap: 10px 22px;
+}
+.motor-slider {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.motor-slider input[type="range"] {
+  width: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  accent-color: var(--accent);
+}
+.motor-slider output {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.cli-quick {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.cli-output {
+  height: 300px;
+  overflow: auto;
+  background: var(--input);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 12px 14px;
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.cli-output .cli-in {
+  color: var(--accent);
+}
+.cli-output .cli-error {
+  color: #f07676;
+}
+.cli-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.cli-input input {
+  flex: 1;
+  font-family: "Cascadia Mono", "Consolas", monospace;
+}
 .empty-chart {
   height: 100%;
   display: grid;
@@ -652,6 +735,18 @@ dd {
   gap: 12px;
   margin: 18px 0;
 }
+.target-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.target-row .combobox {
+  flex: 1;
+  min-width: 0;
+}
+.field-label > .status {
+  margin-top: 0;
+}
 .pad-selects label,
 .wiring > label {
   display: grid;
@@ -775,13 +870,13 @@ pre {
   }
   .sidebar nav {
     display: flex;
-    gap: 5px;
+    gap: 4px;
   }
   .sidebar nav button {
     flex: 1;
-    padding: 9px 6px;
-    font-size: 12px;
-    gap: 5px;
+    padding: 8px 5px;
+    font-size: 11px;
+    gap: 4px;
   }
   .source-link {
     display: none;

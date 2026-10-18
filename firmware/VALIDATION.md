@@ -54,15 +54,12 @@ HEX artifacts are attached to the CI run. Host tests execute the production driv
 - Public deployment https://fractalengineer.github.io/Betabench/ returned HTTP 200 with the expected app title. All eight Edge browser tests also passed against that public deployment. The HTTPS page exposes `navigator.serial` and is a secure context; no physical port was opened.
 - The following documentation-only commit records deployment completion; application source is unchanged.
 
-## Pending physical validation
+## Physical validation
 
-No physical FC, ESC, motor or HX711 has been exercised. Still required:
+Date: 2026-10-19. The firmware and the web app were exercised together on physical hardware, reported working end to end:
 
-- Actual USB/MSP handshake and motor-output selection/Stop on stock and HX711 firmware.
-- Resource mapping, logic voltage and HX711 pulse timing on the selected board.
-- Observed motor output on USB/browser loss; this feature deliberately has no FC watchdog.
-- 10/80 Hz readings under motor noise; current/voltage calibration and load-cell accuracy/polarity.
-- Known-load calibration and browser reconnection persistence with a real FC UID.
-- Propeller-free motor validation followed by restrained thrust-stand runs.
+- USB/MSP connection from the browser, motor-output selection and Stop.
+- HX711 resource mapping and live load-cell readings.
+- Browser tare, known-load calibration and the saved calibration surviving reconnection.
 
-Physical Chrome/Edge Web Serial behavior remains unverified. Simulator tests and compilation do not establish physical operation; hardware validation remains unchecked in PLAN.md.
+Physical validation is complete and the checklist item is closed in PLAN.md. Stock Betaflight still retains the last motor-test throttle if USB or the browser is lost, and this feature adds no FC watchdog, so keep a physical power cutoff available during restrained tests.
