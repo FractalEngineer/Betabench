@@ -4,33 +4,29 @@ A browser-based motor and ESC test bench using a Betaflight flight controller.
 
 **[Open Betabench](https://fractalengineer.github.io/Betabench/)** · [Implementation checklist](PLAN.md) · [Firmware and wiring](firmware/README.md) · [MSP extension](firmware/PROTOCOL.md)
 
-Deployment is pending approval to merge [PR #1](https://github.com/FractalEngineer/Betabench/pull/1). The implementation and local simulator are ready.
-
-The local test preview is ready. Deployment remains pending testing and validation; the [draft web app PR](https://github.com/FractalEngineer/Betabench/pull/1) is unmerged. No upstream Betaflight PR has been opened.
-
 ## Use
 
 Open the app in desktop Chrome or Edge. Select **Try simulator** to explore without hardware, or **Connect FC** to choose the USB serial port. Close Betaflight Configurator first so the port is available.
 
-Choose MiniQuadTestBench or the 0→100→0 sweep, select motor outputs, and edit the timeline or segment table. Save a copy to retain custom profiles. Secure the stand, enable the outputs for this run, and press **Run profile**. A three-second countdown precedes playback. Stop is always available while connected.
+Choose MiniQuadTestBench or the 0→100→0 sweep, select motor outputs, and edit the timeline or point table. Save a copy to retain custom profiles. Secure the stand, enable the outputs for this run, and press **Run profile**. A three-second countdown precedes playback. Stop is always available while connected.
 
 The app requires Betaflight MSP API 1.42+ and conventional DShot150/300/600. Reversible/3D and inverted motor outputs are rejected. It reads the configured FC voltage/current sources; accurate electrical measurements require the FC sensors to be connected and calibrated. Shared current and thrust represent the selected motors together, including board consumption. Optional RPM and ESC temperature depend on configured telemetry support.
 
-**Stock firmware retains its last motor-test throttle after a browser crash or lost USB connection.** Keep a physical power cutoff available. Enhanced firmware adds a 500 ms FC command watchdog. Browser scheduling targets 50 Hz and is not a real-time control guarantee; measured rate and maximum telemetry gap appear in the UI. Hidden pages, command delays, stale telemetry, serial failures, and storage failures abort a run. Reconnection never resumes it.
+**Betaflight retains its last motor-test throttle after a browser crash or lost USB connection.** Keep a physical power cutoff available. Browser scheduling targets 50 Hz and is not a real-time control guarantee; measured rate and maximum telemetry gap appear in the UI. Hidden pages, command delays, stale telemetry, serial failures, and storage failures abort a run. Reconnection never resumes it.
 
 ## Profiles and results
 
-- Drag timeline handles or edit duration/throttle numerically. Holds, linear ramps, explicit Stop, and minimum running throttle are distinct. A normal 0% endpoint means stopped; **MIN RUN** changes zero to DShot's minimum running command.
+- Drag individual points in time and throttle or edit them numerically. Nearby horizontal/vertical alignments snap into place; hold Alt to bypass snapping. Double-click to add points. Holds, linear ramps, explicit Stop, and minimum running throttle are distinct. A normal 0% endpoint means stopped; **MIN RUN** changes zero to DShot's minimum running command.
 - MiniQuadTestBench is a normalized 28-second sequence; the triangular sweep defaults to six seconds each way.
 - Profiles and runs are saved in IndexedDB in this browser and origin. Clearing browser/site data removes them. Browser history is not a backup: export runs you want to keep.
 - CSV contains timestamped measurements with units, requested throttle/outputs, transmitted outputs, available FC output readback, and optional load-cell/RPM data. JSON contains the complete run and its profile, equipment notes, firmware identity, and calibration snapshot. JSON runs and profiles can be imported.
-- History supports overlays. Missing measurements stay empty; thrust efficiency is calculated only with valid thrust and power. Simulated runs are explicitly marked.
+- Current, voltage, power and thrust curves can be displayed together in distinct colors. History supports run overlays. Load-cell units can be g, kg, N or lbf; exported measurements remain in grams. Missing measurements stay empty; thrust efficiency is calculated only with valid thrust and power. Simulated runs are explicitly marked.
 
 ## Load cell
 
-Build the optional firmware with `USE_HX711`, connect an HX711 to free GPIO resources, then use **Load cell** to tare the empty stand, enter a known mass in grams, calibrate, and save to the FC. Capture needs stopped motors and stable samples. Only Save writes calibration to flash.
+Build the optional firmware with `USE_HX711`, connect an HX711 to free GPIO resources, then use **Load cell** to tare the empty stand, enter a known mass in grams, calibrate, and save in this browser for this FC UID. Capture needs stopped motors and stable samples. GPIO assignments alone are stored on the FC. Calibration and logs can be exported with run JSON.
 
-CLRACINGF4 uses TX4/PA0 for clock, RX4/PA1 for data, and USB for MSP. Pins are assigned through normal Betaflight CLI resources with Save/Reboot, without changing the board target. See the [firmware guide](firmware/README.md) for signal voltage, complete commands, restoration, and build instructions.
+Select a target and repurposed pads to generate resource CLI commands; Custom supports current resource dumps. CLRACINGF4 defaults to TX4/PA0 for clock, RX4/PA1 for data, and USB for MSP. Pins are assigned through normal Betaflight CLI resources with Save/Reboot, without changing the board target. See the [firmware guide](firmware/README.md) for signal voltage, complete commands, restoration, and build instructions.
 
 ## Development
 

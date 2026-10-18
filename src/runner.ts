@@ -136,7 +136,7 @@ export class RunController {
         if (!this.halted) await this.stop(String(e));
         return;
       }
-      const period = this.device.identity.enhanced ? 20 : 50;
+      const period = 50;
       await new Promise((r) =>
         setTimeout(r, Math.max(0, period - (performance.now() - t))),
       );

@@ -12,25 +12,10 @@ export const MSP = {
   MOTOR_TELEMETRY: 139,
   ARMING_DISABLE: 99,
   SET_MOTOR: 214,
-  CAPS: 0x30f0,
-  BEGIN: 0x30f1,
-  SET: 0x30f2,
-  STOP: 0x30f3,
-  SAMPLE: 0x30f4,
-  TARE: 0x30f5,
-  CALIBRATE: 0x30f6,
-  SAVE: 0x30f7,
+  HX_SAMPLE: 0x30f0,
 } as const;
 export const PROTOCOL_VERSION = 1;
-export const HX = {
-  CONFIGURED: 1,
-  FRESH: 2,
-  CALIBRATED: 4,
-  SATURATED: 8,
-  BUSY: 16,
-  FAILED: 32,
-  SAVED: 64,
-} as const;
+export const HX = { CONFIGURED: 1, FRESH: 2, SATURATED: 4 } as const;
 export type Frame = { command: number; payload: Uint8Array; error: boolean };
 export function crc8(data: Uint8Array) {
   let crc = 0;

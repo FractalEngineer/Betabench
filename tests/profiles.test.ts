@@ -5,6 +5,9 @@ import {
   duration,
   duplicate,
   validateProfile,
+  movedPoint,
+  insertedPoint,
+  removedPoint,
 } from "../src/profiles";
 describe("profile playback", () => {
   it("matches every MQTB boundary with explicit stop and minimum", () => {
@@ -44,17 +47,69 @@ describe("profile playback", () => {
     for (const p of presets)
       expect(validateProfile(JSON.parse(JSON.stringify(p)))).toEqual(p);
     const p = duplicate(presets[0]);
-    p.segments[0].from = 80;
-    expect(presets[0].segments[0].from).toBe(3.5);
+    p.points[0].throttle = 80;
+    expect(presets[0].points[0].throttle).toBe(3.5);
     for (const changes of [
-      { durationMs: 0 },
-      { from: 101 },
-      { to: NaN },
-      { kind: "unknown" },
+      { timeMs: -1 },
+      { throttle: 101 },
+      { throttle: NaN },
+      { minimum: "unknown" },
     ]) {
       const p = duplicate(presets[0]);
-      Object.assign(p.segments[0], changes);
+      Object.assign(p.points[0], changes);
       expect(() => validateProfile(p)).toThrow();
     }
+  });
+  it("moves time and throttle freely, snaps right angles, and preserves ordering", () => {
+    const p = presets[1];
+    const free = movedPoint(p, 1, 4000, 65);
+    expect(free.points[1]).toMatchObject({ timeMs: 4000, throttle: 65 });
+    expect(evaluate(free, 2000).throttle).toBe(32.5);
+    expect(movedPoint(p, 1, 30, 0.4, 50, 1).points[1]).toMatchObject({
+      timeMs: 0,
+      throttle: 0,
+    });
+    expect(movedPoint(p, 1, 14000, 150).points[1]).toMatchObject({
+      timeMs: 12000,
+      throttle: 100,
+    });
+    const short = {
+      ...p,
+      points: [
+        { ...p.points[0], timeMs: 0 },
+        { ...p.points[1], timeMs: 5 },
+        { ...p.points[2], timeMs: 105 },
+      ],
+    };
+    expect(movedPoint(short, 0, 5, 5, 50, 1).points[0].timeMs).toBe(0);
+    expect(movedPoint(short, 1, 104, 40).points[1].timeMs).toBeLessThanOrEqual(
+      105,
+    );
+    expect(validateProfile(insertedPoint(p, 3000, 25)).points).toHaveLength(4);
+  });
+  it("migrates earlier square/linear profiles to editable points without changing playback", () => {
+    const legacy = {
+      version: 1,
+      id: "old",
+      name: "Old",
+      description: "",
+      segments: [
+        { kind: "hold", from: 20, to: 20, durationMs: 1000 },
+        { kind: "linear", from: 0, to: 100, durationMs: 1000, minimum: true },
+        { kind: "stop", from: 0, to: 0, durationMs: 1000 },
+      ],
+    };
+    const p = validateProfile(legacy);
+    expect(p.version).toBe(2);
+    expect(evaluate(p, 999).throttle).toBe(20);
+    expect(evaluate(p, 1000).output).toBe(1001);
+    expect(evaluate(p, 1500).throttle).toBe(50);
+    expect(evaluate(p, 2000).output).toBe(1000);
+  });
+  it("retains a usable time domain when removing the last point after a vertical step", () => {
+    const p = movedPoint(presets[1], 1, 0, 100);
+    const next = removedPoint(p, 2);
+    expect(duration(next)).toBe(100);
+    expect(validateProfile(next)).toEqual(next);
   });
 });

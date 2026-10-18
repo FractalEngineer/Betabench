@@ -46,9 +46,7 @@ test("timeline drag edits throttle and mobile fits within the viewport", async (
   await page.mouse.down();
   await page.mouse.move(p!.x + p!.width / 2, p!.y - 45, { steps: 6 });
   await page.mouse.up();
-  await expect(page.getByLabel("Segment 1 from percent")).not.toHaveValue(
-    "3.5",
-  );
+  await expect(page.getByLabel("Point 1 throttle")).not.toHaveValue("3.5");
   await page.setViewportSize({ width: 390, height: 844 });
   expect(
     await page.evaluate(

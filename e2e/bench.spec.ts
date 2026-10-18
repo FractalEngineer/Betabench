@@ -5,9 +5,7 @@ test("simulator, profile editing, run, history, calibration and exports", async 
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("");
-  await expect(
-    page.getByRole("heading", { name: "The motor lab." }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Test bench" })).toBeVisible();
   await page.getByRole("button", { name: "Try simulator" }).click();
   await expect(
     page.getByText("Virtual CLRACINGF4", { exact: true }),
@@ -15,8 +13,8 @@ test("simulator, profile editing, run, history, calibration and exports", async 
   await page
     .getByLabel("Choose preset or saved profile")
     .selectOption("triangle");
-  await page.getByLabel("Segment 1 seconds").fill("0.5");
-  await page.getByLabel("Segment 2 seconds").fill("0.5");
+  await page.getByLabel("Point 2 time").fill("0.5");
+  await page.getByLabel("Point 3 time").fill("1");
   await page.getByLabel("Profile name").fill("Smoke sweep");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await page.getByLabel("Bench is secured and ready.").check();
@@ -30,9 +28,7 @@ test("simulator, profile editing, run, history, calibration and exports", async 
   await page.getByRole("button", { name: "Run history" }).click();
   await expect(page.getByText("complete", { exact: true })).toBeVisible();
   await page.getByRole("checkbox", { name: /Overlay/ }).check();
-  await expect(
-    page.getByText("Run comparison · seconds from start"),
-  ).toBeVisible();
+  await expect(page.getByText("Run comparison")).toBeVisible();
   await page.reload();
   await page.getByRole("button", { name: "Run history" }).click();
   await expect(page.getByText("complete", { exact: true })).toBeVisible();

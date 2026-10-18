@@ -1,12 +1,6 @@
-import {
-  MSP,
-  HX,
-  PROTOCOL_VERSION,
-  Parser,
-  frame,
-  packed,
-  view,
-} from "./protocol";
+import { loadCalibration, persistCalibration } from "./storage";
+import { tareCalibration, weightCalibration } from "./calibration";
+import { MSP, HX, Parser, frame, packed, view } from "./protocol";
 import type { BenchDevice, Calibration, Identity, Sample } from "./types";
 
 type Job = {
@@ -73,7 +67,7 @@ export class SerialLink {
         reject(Error("Serial port closed or failed; reconnect required"));
         return;
       }
-      if (command === MSP.SET_MOTOR || command === MSP.SET) {
+      if (command === MSP.SET_MOTOR) {
         for (const job of this.queue.filter((j) => j.command === command))
           job.resolve(SUPERSEDED);
         this.queue = this.queue.filter((j) => j.command !== command);
@@ -132,10 +126,8 @@ export class SerialLink {
 
 export class FlightController implements BenchDevice {
   identity!: Identity;
-  calibration?: Calibration;
-  private session = 0;
-  private sequence = 0;
-  private calibrationBusy = false;
+  calibration: Calibration = { offset: 0, countsPerGram: 0, saved: false };
+  private tared = false;
   private telemetryCounter = 0;
   private motorTelemetry?: { rpm: number[]; escTemperature: number[] };
   constructor(readonly link: SerialLink) {}
@@ -181,19 +173,10 @@ export class FlightController implements BenchDevice {
     const state = await this.link.request(MSP.STATUS);
     if (view(state, 10).getUint32(6, true) & 1)
       throw Error("FC is armed. Disarm before connecting");
-    let enhanced = false,
-      hx711 = false;
+    let hx711 = false;
     try {
-      const caps = await this.link.request(MSP.CAPS);
-      const v = view(caps, 5);
-      if (
-        caps[0] !== PROTOCOL_VERSION ||
-        caps[2] !== motorCount ||
-        v.getUint16(3, true) !== 500
-      )
-        throw Error("Incompatible bench protocol");
-      enhanced = !!(caps[1] & 1);
-      hx711 = !!(caps[1] & 2);
+      decodeHxSample(await this.link.request(MSP.HX_SAMPLE));
+      hx711 = true;
     } catch (e) {
       if (!(e instanceof Unsupported)) throw e;
     }
@@ -204,23 +187,26 @@ export class FlightController implements BenchDevice {
       version: [...version.subarray(0, 3)].join("."),
       api: `${api[1]}.${api[2]}`,
       motorCount,
-      enhanced,
       hx711,
       simulated: false,
       voltageSource: battery[5],
       currentSource: battery[6],
     };
+    const saved = await loadCalibration(uid);
+    if (
+      saved &&
+      Number.isFinite(saved.offset) &&
+      Number.isFinite(saved.countsPerGram) &&
+      Math.abs(saved.countsPerGram) >= 0.0001
+    )
+      this.calibration = { ...saved, saved: true };
     return this;
   }
+
   async begin() {
-    const state = await this.link.request(MSP.STATUS);
-    if (view(state, 10).getUint32(6, true) & 1) throw Error("FC is armed");
+    await this.ensureStopped();
     await this.link.request(MSP.ARMING_DISABLE, new Uint8Array([1, 0]), 2);
-    if (this.identity.enhanced) {
-      const response = await this.link.request(MSP.BEGIN, new Uint8Array(), 2);
-      this.session = view(response, 4).getUint32(0, true);
-      this.sequence = 0;
-    } else await this.motors(Array(this.identity.motorCount).fill(1000));
+    await this.motors(Array(this.identity.motorCount).fill(1000));
   }
   async motors(values: number[]) {
     if (
@@ -228,65 +214,37 @@ export class FlightController implements BenchDevice {
       !values.every((v) => Number.isInteger(v) && v >= 1000 && v <= 2000)
     )
       throw Error("Invalid motor outputs");
-    if (this.identity.enhanced && !this.session)
-      throw Error("No active bench session");
-    const payload = packed(
-      (this.identity.enhanced ? 9 : 0) + values.length * 2,
-      (v) => {
-        let offset = 0;
-        if (this.identity.enhanced) {
-          v.setUint32(0, this.session, true);
-          v.setUint32(4, ++this.sequence, true);
-          v.setUint8(8, values.length);
-          offset = 9;
-        }
-        values.forEach((n, i) => v.setUint16(offset + i * 2, n, true));
-      },
+    const data = packed(values.length * 2, (v) =>
+      values.forEach((n, i) => v.setUint16(i * 2, n, true)),
     );
-    const response = await this.link.request(
-      this.identity.enhanced ? MSP.SET : MSP.SET_MOTOR,
-      payload,
-      2,
-    );
-    return response !== SUPERSEDED;
+    return (await this.link.request(MSP.SET_MOTOR, data, 2)) !== SUPERSEDED;
   }
   async stop() {
-    this.session = 0;
-    const payload = packed(this.identity.motorCount * 2, (v) => {
+    const data = packed(this.identity.motorCount * 2, (v) => {
       for (let i = 0; i < this.identity.motorCount; i++)
         v.setUint16(i * 2, 1000, true);
     });
-    await this.link.emergency(
-      this.identity.enhanced ? MSP.STOP : MSP.SET_MOTOR,
-      this.identity.enhanced ? new Uint8Array() : payload,
+    await this.link.emergency(MSP.SET_MOTOR, data);
+    const state = view(
+      await this.link.request(MSP.MOTOR, new Uint8Array(), 3),
+      this.identity.motorCount * 2,
     );
-    const stopped = await this.link.request(
-      this.identity.enhanced ? MSP.SAMPLE : MSP.MOTOR,
-      new Uint8Array(),
-      3,
-    );
-    if (this.identity.enhanced) {
-      const s = decodeSample(stopped, this.identity);
-      if (s.session !== 0 || s.outputs.some((v) => v !== 1000))
+    for (let i = 0; i < this.identity.motorCount; i++)
+      if (state.getUint16(i * 2, true) > 1000)
         throw Error("FC did not confirm stopped outputs");
-    } else {
-      const v = view(stopped, this.identity.motorCount * 2);
-      for (let i = 0; i < this.identity.motorCount; i++)
-        if (v.getUint16(i * 2, true) !== 1000)
-          throw Error("FC did not confirm stopped outputs");
-    }
+  }
+  private async ensureStopped() {
+    const state = await this.link.request(MSP.STATUS);
+    if (view(state, 10).getUint32(6, true) & 1) throw Error("FC is armed");
+    const outputs = view(
+      await this.link.request(MSP.MOTOR),
+      this.identity.motorCount * 2,
+    );
+    for (let i = 0; i < this.identity.motorCount; i++)
+      if (outputs.getUint16(i * 2, true) > 1000)
+        throw Error("Stop all motors first");
   }
   async sample(): Promise<Omit<Sample, "t" | "throttle">> {
-    if (this.identity.enhanced) {
-      const data = await this.link.request(MSP.SAMPLE);
-      const s = decodeSample(data, this.identity);
-      this.calibration = s.calibration;
-      if (this.session && s.session !== this.session)
-        throw Error("Firmware bench session stopped or timed out");
-      if (++this.telemetryCounter % 10 === 0 && !this.calibrationBusy)
-        await this.optionalMotorTelemetry();
-      return { ...s, ...this.motorTelemetry };
-    }
     const data = await this.link.request(MSP.BATTERY);
     const v = view(data, 11);
     if (++this.telemetryCounter % 5 === 0) {
@@ -301,6 +259,9 @@ export class FlightController implements BenchDevice {
     const current = this.identity.currentSource
       ? v.getInt16(5, true) / 100
       : undefined;
+    const hx = this.identity.hx711
+      ? decodeHxSample(await this.link.request(MSP.HX_SAMPLE), this.calibration)
+      : {};
     return {
       voltage,
       current,
@@ -310,6 +271,7 @@ export class FlightController implements BenchDevice {
           : undefined,
       outputs: [],
       ...this.motorTelemetry,
+      ...hx,
     };
   }
   private motorTelemetrySupported = true;
@@ -332,109 +294,94 @@ export class FlightController implements BenchDevice {
       else throw e;
     }
   }
-  private async operation(
-    command: number,
-    payload: Uint8Array = new Uint8Array(),
-  ) {
+
+  private async capture() {
     if (!this.identity.hx711) throw Error("HX711 firmware is unavailable");
-    this.calibrationBusy = true;
-    try {
-      await this.link.request(
-        command,
-        payload,
-        1,
-        command === MSP.SAVE ? 2000 : 150,
-      );
-      const end = performance.now() + 3000;
-      while (performance.now() < end) {
-        await new Promise((r) => setTimeout(r, 100));
-        const data = await this.link.request(MSP.SAMPLE);
-        const s = decodeSample(data, this.identity);
-        this.calibration = s.calibration;
-        if (s.hxStatus! & HX.FAILED)
-          throw Error(
-            "Load-cell capture failed. Check stable load, wiring and sample freshness",
-          );
-        if (!(s.hxStatus! & HX.BUSY)) return;
+    await this.ensureStopped();
+    const end = performance.now() + 1100;
+    const values: number[] = [];
+    let sequence: number | undefined;
+    while (performance.now() < end) {
+      const s = decodeHxSample(await this.link.request(MSP.HX_SAMPLE));
+      if (
+        !(s.hxStatus & HX.CONFIGURED) ||
+        !(s.hxStatus & HX.FRESH) ||
+        s.hxStatus & HX.SATURATED ||
+        s.hxAgeMs > 250
+      )
+        throw Error("HX711 is missing, stale, or saturated");
+      if (s.hxSequence !== sequence) {
+        values.push(s.raw!);
+        sequence = s.hxSequence;
       }
-      throw Error("Load-cell operation timed out");
-    } finally {
-      this.calibrationBusy = false;
+      await new Promise((r) => setTimeout(r, 20));
     }
+    return values;
   }
   async tare() {
-    await this.operation(MSP.TARE);
+    this.calibration = tareCalibration(await this.capture(), this.calibration);
+    this.tared = true;
   }
   async calibrate(grams: number) {
-    if (!Number.isFinite(grams) || grams < 0.001 || grams > 500000)
-      throw Error("Enter a known mass between 0 and 500000 g");
-    await this.operation(
-      MSP.CALIBRATE,
-      packed(4, (v) => v.setUint32(0, Math.round(grams * 1000), true)),
+    if (!this.tared && !this.calibration.saved)
+      throw Error("Tare the unloaded stand first");
+    this.calibration = weightCalibration(
+      await this.capture(),
+      this.calibration,
+      grams,
     );
   }
   async saveCalibration() {
-    await this.operation(MSP.SAVE);
-    if (!this.calibration?.saved)
-      throw Error("Firmware did not confirm saved calibration");
+    await this.ensureStopped();
+    if (
+      !Number.isFinite(this.calibration.countsPerGram) ||
+      Math.abs(this.calibration.countsPerGram) < 0.0001
+    )
+      throw Error("Calibrate first");
+    const saved = { ...this.calibration, saved: true };
+    await persistCalibration(this.identity.uid!, saved);
+    const readback = await loadCalibration(this.identity.uid!);
+    if (
+      !readback ||
+      readback.offset !== saved.offset ||
+      readback.countsPerGram !== saved.countsPerGram
+    )
+      throw Error("Calibration save verification failed");
+    this.calibration = saved;
   }
   async close() {
     await this.stop().catch(() => {});
     await this.link.close();
   }
 }
-
-export function decodeSample(data: Uint8Array, identity: Identity) {
-  const v = view(data, 15);
-  if (data[0] !== 1) throw Error("Unsupported sample protocol");
-  const count = data[14];
-  if (count !== identity.motorCount) throw Error("Motor count changed");
-  view(data, 15 + count * 2 + 25);
-  const outputs = Array.from({ length: count }, (_, i) =>
-    v.getUint16(15 + i * 2, true),
-  );
-  let o = 15 + count * 2;
-  const status = data[o++];
-  const raw = v.getInt32(o, true);
-  o += 4;
-  const mg = v.getInt32(o, true);
-  o += 4;
-  const sequence = v.getUint32(o, true);
-  o += 4;
-  const age = v.getUint32(o, true);
-  o += 4;
-  const offset = v.getInt32(o, true);
-  o += 4;
-  const scale = v.getFloat32(o, true);
-  const valid =
+export function decodeHxSample(data: Uint8Array, calibration?: Calibration) {
+  const v = view(data, 18);
+  if (data.length !== 18 || data[0] !== 1)
+    throw Error("Incompatible HX711 firmware; install the HX711-only build");
+  const status = data[1];
+  const raw = v.getInt32(2, true);
+  const fresh =
+    !!(status & HX.CONFIGURED) &&
     !!(status & HX.FRESH) &&
-    !!(status & HX.CALIBRATED) &&
-    !(status & HX.SATURATED);
-  const voltage = identity.voltageSource
-    ? v.getUint16(10, true) / 100
-    : undefined;
-  const current = identity.currentSource
-    ? v.getInt16(12, true) / 100
-    : undefined;
+    !(status & HX.SATURATED) &&
+    v.getUint32(10, true) <= 250;
+  const valid =
+    fresh &&
+    !!calibration &&
+    Number.isFinite(calibration.offset) &&
+    Number.isFinite(calibration.countsPerGram) &&
+    Math.abs(calibration.countsPerGram) >= 0.0001;
   return {
-    session: v.getUint32(2, true),
-    fcTime: v.getUint32(6, true),
-    outputs,
-    voltage,
-    current,
-    power:
-      voltage !== undefined && current !== undefined
-        ? voltage * current
-        : undefined,
-    hxStatus: status,
+    fcTime: v.getUint32(14, true),
     raw: status & HX.CONFIGURED ? raw : undefined,
-    thrustG: valid ? mg / 1000 : undefined,
-    hxSequence: sequence,
-    hxAgeMs: age,
+    hxStatus: status,
+    hxSequence: v.getUint32(6, true),
+    hxAgeMs: v.getUint32(10, true),
     hxValid: valid,
-    calibration: identity.hx711
-      ? { offset, countsPerGram: scale, saved: !!(status & HX.SAVED) }
+    thrustG: valid
+      ? (raw - calibration!.offset) / calibration!.countsPerGram
       : undefined,
+    calibration: calibration ? { ...calibration } : undefined,
   };
 }
 
@@ -444,7 +391,6 @@ export class Simulator implements BenchDevice {
     version: "2026.6.1",
     api: "1.47",
     motorCount: 4,
-    enhanced: true,
     hx711: true,
     simulated: true,
     voltageSource: 1,
@@ -453,26 +399,19 @@ export class Simulator implements BenchDevice {
   calibration: Calibration = { offset: 0, countsPerGram: 420, saved: true };
   private values = [1000, 1000, 1000, 1000];
   private active = false;
-  private lastCommand = 0;
   private sequence = 0;
   async begin() {
     this.active = true;
-    this.lastCommand = performance.now();
   }
   async motors(values: number[]) {
     if (!this.active) throw Error("Simulator session stopped");
     this.values = [...values];
-    this.lastCommand = performance.now();
   }
   async stop() {
     this.values.fill(1000);
     this.active = false;
   }
   async sample() {
-    if (this.active && performance.now() - this.lastCommand >= 500) {
-      await this.stop();
-      throw Error("Simulated firmware watchdog expired");
-    }
     const loads = this.values.map((v) => (v - 1000) / 1000);
     const total = loads.reduce((a, b) => a + b, 0);
     const current = 0.15 + loads.reduce((a, b) => a + 22 * b * b, 0);
@@ -488,11 +427,7 @@ export class Simulator implements BenchDevice {
       hxSequence: ++this.sequence,
       hxAgeMs: 0,
       hxValid: true,
-      hxStatus:
-        HX.CONFIGURED |
-        HX.FRESH |
-        HX.CALIBRATED |
-        (this.calibration.saved ? HX.SAVED : 0),
+      hxStatus: HX.CONFIGURED | HX.FRESH,
       calibration: { ...this.calibration },
       outputs: [...this.values],
     };

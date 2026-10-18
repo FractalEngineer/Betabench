@@ -1,16 +1,20 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  MeasurementsChart,
+  MetricSelector,
+  type Metric,
+} from "./MeasurementsChart";
+import { loadUnits, type LoadUnit } from "./calibration";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import {
   Activity,
   ArrowDownToLine,
   ArrowUpFromLine,
   Cable,
   Check,
-  ChevronRight,
   CircleStop,
   Copy,
   FlaskConical,
   Gauge,
-  GitBranch,
   Play,
   Plus,
   Radio,
@@ -21,21 +25,16 @@ import {
   Unplug,
   Zap,
 } from "lucide-react";
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import type { BenchDevice, Profile, Run, Sample } from "./types";
 import { presets, duplicate, duration, validateProfile } from "./profiles";
 import { FlightController, SerialLink, Simulator } from "./device";
 import { RunController } from "./runner";
 import { store, download, csv, validateRun } from "./storage";
 import { ProfileEditor } from "./ProfileEditor";
+
+const ResourceSetup = lazy(() =>
+  import("./ResourceSetup").then((m) => ({ default: m.ResourceSetup })),
+);
 
 const fmt = (v: number | undefined, d = 2) =>
   v === undefined || !Number.isFinite(v) ? "—" : v.toFixed(d);
@@ -49,15 +48,26 @@ export default function App() {
   const [enabled, setEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
-  const [status, setStatus] = useState("Ready when you are");
+  const [status, setStatus] = useState("Ready");
   const [error, setError] = useState("");
   const [sample, setSample] = useState<Partial<Sample>>({});
   const [activeRun, setActiveRun] = useState<Run>();
   const [runs, setRuns] = useState<Run[]>([]);
   const [overlays, setOverlays] = useState<string[]>([]);
-  const [metric, setMetric] = useState<
-    "current" | "thrustG" | "voltage" | "power"
-  >("current");
+  const [selectedMetrics, setSelectedMetrics] = useState<Metric[]>([
+    "current",
+    "voltage",
+    "power",
+    "thrustG",
+  ]);
+  const [loadUnit, setLoadUnit] = useState<LoadUnit>(() =>
+    (localStorage.getItem("load-unit") as LoadUnit) in loadUnits
+      ? (localStorage.getItem("load-unit") as LoadUnit)
+      : "g",
+  );
+  const [theme, setTheme] = useState(
+    () => localStorage.getItem("theme") || "dark",
+  );
   const [mass, setMass] = useState(100);
   const controller = useRef<RunController | undefined>(undefined);
   const deviceRef = useRef<BenchDevice | undefined>(undefined);
@@ -271,10 +281,6 @@ export default function App() {
   }
   const samples = activeRun?.samples ?? [];
   const elapsed = samples.at(-1)?.t ?? 0;
-  const points = samples
-    .slice(-3000)
-    .filter((_, i, a) => i % Math.max(1, Math.floor(a.length / 600)) === 0)
-    .map((s) => ({ ...s, seconds: s.t / 1000 }));
   const rate =
     samples.length > 1
       ? ((samples.length - 1) * 1000) / (samples.at(-1)!.t - samples[0].t)
@@ -315,27 +321,19 @@ export default function App() {
       </div>
     </div>
   );
+
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-theme={theme}>
       <aside className="sidebar">
         <a className="brand" href={import.meta.env.BASE_URL}>
-          <div className="brand-icon">
-            <Activity size={24} />
-          </div>
-          <span>
-            beta<span className="brand-light">bench</span>
-            <small>MOTOR & ESC LAB</small>
-          </span>
+          <Activity size={24} /> Betabench
         </a>
-        <div className="workspace-tag">
-          <span className="dot" /> WORKSPACE / LOCAL
-        </div>
         <nav>
           {(
             [
-              ["bench", "Test bench", <SlidersHorizontal size={18} />],
-              ["history", "Run history", <Activity size={18} />],
-              ["loadcell", "Load cell", <Scale size={18} />],
+              ["bench", "Test bench", <SlidersHorizontal size={17} />],
+              ["history", "Run history", <Activity size={17} />],
+              ["loadcell", "Load cell", <Scale size={17} />],
             ] as const
           ).map(([key, label, icon]) => (
             <button
@@ -351,63 +349,44 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <div className="sidebar-bottom">
-          <div>
-            <GitBranch size={14} /> v0.1 · open source
-          </div>
-          <a
-            href="https://github.com/FractalEngineer/Betabench"
-            target="_blank"
-            rel="noreferrer"
-          >
-            View on GitHub <ChevronRight size={13} />
-          </a>
-          <p>
-            Your hardware. Your data.
-            <br />
-            Everything stays in this browser.
-          </p>
-        </div>
+        <a
+          className="source-link"
+          href="https://github.com/FractalEngineer/Betabench"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Source
+        </a>
       </aside>
       <main>
         <header className="topbar">
-          <span>
-            Workspace <ChevronRight size={14} />{" "}
+          <h1>
             {tab === "bench"
               ? "Test bench"
               : tab === "history"
                 ? "Run history"
                 : "Load cell"}
-          </span>
-          <span className="local-badge">
-            <span className={"dot " + (device ? "green" : "")} />
-            {device
-              ? identity?.simulated
-                ? "SIMULATION"
-                : "FC CONNECTED"
-              : "NO DEVICE"}
-          </span>
+          </h1>
+          <div className="actions">
+            <span className="pill">
+              {device
+                ? identity?.simulated
+                  ? "Simulator"
+                  : "Connected"
+                : "Disconnected"}
+            </span>
+            <button
+              onClick={() => {
+                const next = theme === "dark" ? "light" : "dark";
+                setTheme(next);
+                localStorage.setItem("theme", next);
+              }}
+            >
+              {theme === "dark" ? "Light theme" : "Dark theme"}
+            </button>
+          </div>
         </header>
         <div className="content">
-          <div className="page-heading">
-            <div className="eyebrow">
-              BETAfLIGHT POWERED · BROWSER CONTROLLED
-            </div>
-            <h1>
-              {tab === "bench"
-                ? "The motor lab."
-                : tab === "history"
-                  ? "Every run, recorded."
-                  : "Measure the pull."}
-            </h1>
-            <p>
-              {tab === "bench"
-                ? "Shape a sweep. Spin it up. See what your setup can do."
-                : tab === "history"
-                  ? "Compare setups and take your measurements with you."
-                  : "Zero, calibrate, and capture thrust with an HX711 load cell."}
-            </p>
-          </div>
           {error && (
             <div className="notice error" role="alert">
               {error}
@@ -417,17 +396,13 @@ export default function App() {
             </div>
           )}
           <section className="connection panel">
-            <div className="connection-icon">
-              <Cable size={22} />
-            </div>
+            <Cable size={20} />
             <div className="connection-details">
-              <strong>
-                {device ? identity?.name : "Connect your flight controller"}
-              </strong>
+              <strong>{device ? identity?.name : "Flight controller"}</strong>
               <span>
                 {device
-                  ? `${identity?.simulated ? "SIMULATED · " : ""}Betaflight ${identity?.version} · MSP ${identity?.api} · ${identity?.motorCount} motors · ${identity?.enhanced ? "500 ms FC watchdog" : "Stock firmware"}`
-                  : "USB serial · Betaflight API 1.42+ · desktop Chrome or Edge"}
+                  ? `Betaflight ${identity?.version} · MSP ${identity?.api} · ${identity?.motorCount} motors${identity?.hx711 ? " · HX711" : ""}`
+                  : "USB MSP · Chrome / Edge"}
               </span>
             </div>
             <div className="actions">
@@ -436,35 +411,28 @@ export default function App() {
                   disabled={busy || running}
                   onClick={() => void disconnect()}
                 >
-                  <Unplug size={15} /> Disconnect
+                  <Unplug size={14} /> Disconnect
                 </button>
               ) : (
                 <>
                   <button disabled={busy} onClick={() => void connect(true)}>
-                    <FlaskConical size={15} /> Try simulator
+                    <FlaskConical size={14} /> Try simulator
                   </button>
                   <button
                     className="primary"
                     disabled={busy}
                     onClick={() => void connect()}
                   >
-                    <Plus size={16} /> Connect FC
+                    <Plus size={14} /> Connect FC
                   </button>
                 </>
               )}
             </div>
           </section>
-          {device && !identity?.enhanced && (
+          {device && !identity?.simulated && (
             <div className="notice warning">
-              Stock firmware retains the last motor command if the browser
-              crashes or USB disconnects. Use a physical power cutoff; enhanced
-              firmware adds a 500 ms command watchdog.
-            </div>
-          )}
-          {identity?.simulated && (
-            <div className="simulation-label">
-              <FlaskConical size={14} /> Simulation mode · Measurements are
-              generated, no hardware is connected.
+              Motor output persists after USB or browser loss. Keep a physical
+              power cutoff available.
             </div>
           )}
           {tab === "bench" && (
@@ -472,13 +440,8 @@ export default function App() {
               <div className="bench-grid">
                 <section className="panel profile-panel">
                   <div className="section-heading">
-                    <div>
-                      <span className="section-number">01</span>
-                      <h2>Throttle profile</h2>
-                    </div>
-                    <span className="pill">
-                      {(duration(profile) / 1000).toFixed(1)} s
-                    </span>
+                    <h2>Throttle profile</h2>
+                    <span>{(duration(profile) / 1000).toFixed(2)} s</span>
                   </div>
                   <div className="profile-toolbar">
                     <select
@@ -498,7 +461,7 @@ export default function App() {
                       }
                     >
                       {!profiles.some((p) => p.id === profile.id) && (
-                        <option value="">Unsaved profile</option>
+                        <option value="">Unsaved</option>
                       )}
                       {profiles.map((p) => (
                         <option key={p.id} value={p.id}>
@@ -508,12 +471,11 @@ export default function App() {
                     </select>
                     <button
                       className="icon"
-                      title="Duplicate profile"
                       aria-label="Duplicate profile"
                       disabled={running}
                       onClick={() => setProfile(duplicate(profile))}
                     >
-                      <Copy size={16} />
+                      <Copy size={15} />
                     </button>
                     <button
                       disabled={running || busy}
@@ -533,47 +495,36 @@ export default function App() {
                     >
                       <ArrowDownToLine size={16} />
                     </button>
+                    <button
+                      className="icon"
+                      aria-label="Import profile or run"
+                      disabled={running || busy}
+                      onClick={() => input.current?.click()}
+                    >
+                      <ArrowUpFromLine size={16} />
+                    </button>
                   </div>
                   <input
                     className="profile-name"
                     aria-label="Profile name"
-                    value={profile.name}
                     disabled={running}
                     maxLength={120}
+                    value={profile.name}
                     onChange={(e) =>
                       setProfile({ ...profile, name: e.target.value })
                     }
                   />
-                  <p className="subtle profile-description">
-                    {profile.description}
-                  </p>
                   <ProfileEditor
                     profile={profile}
                     onChange={setProfile}
                     disabled={running}
                   />
-                  <div className="profile-foot">
-                    <span>
-                      <span className="legend-line" /> THROTTLE
-                    </span>
-                    <button
-                      className="text-button"
-                      disabled={running || busy}
-                      onClick={() => input.current?.click()}
-                    >
-                      <ArrowUpFromLine size={13} /> Import profile / run
-                    </button>
-                  </div>
                 </section>
                 <section className="panel setup-panel">
                   <div className="section-heading">
-                    <div>
-                      <span className="section-number">02</span>
-                      <h2>Run setup</h2>
-                    </div>
-                    <Gauge size={18} />
+                    <h2>Run setup</h2>
                   </div>
-                  <label className="field-label">MOTOR OUTPUTS</label>
+                  <label className="field-label">Motor outputs</label>
                   <div className="motor-buttons">
                     {Array.from(
                       { length: identity?.motorCount ?? 4 },
@@ -582,54 +533,32 @@ export default function App() {
                           key={i}
                           disabled={running}
                           aria-pressed={selected.includes(i)}
+                          className={selected.includes(i) ? "selected" : ""}
                           onClick={() =>
                             setSelected(
                               selected.includes(i)
-                                ? selected.filter((v) => v !== i)
+                                ? selected.filter((n) => n !== i)
                                 : [...selected, i],
                             )
                           }
-                          className={selected.includes(i) ? "selected" : ""}
                         >
-                          <span className="motor-symbol">✣</span>M{i + 1}
+                          M{i + 1}
                           {selected.includes(i) && <Check size={12} />}
                         </button>
                       ),
                     )}
                   </div>
-                  <p className="subtle">
-                    Selected motors follow the same curve. Others stay stopped.
-                  </p>
                   <label className="field-label" htmlFor="notes">
-                    SETUP NOTES
+                    Notes
                   </label>
                   <textarea
                     id="notes"
                     rows={3}
                     disabled={running}
-                    placeholder="Motor, ESC, propeller, battery…"
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
+                    placeholder="Motor, ESC, propeller, battery"
                   />
-                  <div className="run-summary">
-                    <span>
-                      Profile duration
-                      <strong>{(duration(profile) / 1000).toFixed(1)} s</strong>
-                    </span>
-                    <span>
-                      Motor selection
-                      <strong>
-                        {selected.length} output
-                        {selected.length === 1 ? "" : "s"}
-                      </strong>
-                    </span>
-                    <span>
-                      Measurements
-                      <strong>
-                        {identity?.hx711 ? "Electrical + thrust" : "Electrical"}
-                      </strong>
-                    </span>
-                  </div>
                   <label className="enable-check">
                     <input
                       type="checkbox"
@@ -649,8 +578,7 @@ export default function App() {
                     }
                     onClick={() => void start()}
                   >
-                    <Play size={16} /> Run profile{" "}
-                    <span>{(duration(profile) / 1000).toFixed(0)}s</span>
+                    <Play size={14} /> Run profile
                   </button>
                   <button
                     className="stop-button"
@@ -659,40 +587,46 @@ export default function App() {
                   >
                     <CircleStop size={16} /> STOP ALL MOTORS
                   </button>
-                  <p className="fine-print">
-                    Stay on this tab during a run. Switching tabs or losing
-                    telemetry stops the test.
+                  <p className="subtle">
+                    Selected motors share the curve. Other outputs stay stopped.
+                  </p>
+                  <p className="subtle">
+                    Hiding this page or losing telemetry aborts the test.
                   </p>
                 </section>
               </div>
               <section className="panel telemetry-panel">
                 <div className="section-heading">
-                  <div>
-                    <span className="section-number">03</span>
-                    <h2>Live measurements</h2>
-                    <span className={"pill " + (running ? "active-pill" : "")}>
-                      {running
-                        ? status === "Running"
-                          ? "● RECORDING"
-                          : status.startsWith("Starting")
-                            ? "COUNTDOWN"
-                            : "STOPPING"
-                        : "LIVE VIEW"}
-                    </span>
-                  </div>
-                  <span className="subtle">
-                    {rate.toFixed(1)} Hz measured · {maxGap.toFixed(0)} ms max
-                    gap
+                  <h2>Measurements</h2>
+                  <span className="pill">
+                    {running
+                      ? status === "Running"
+                        ? "● RECORDING"
+                        : status.startsWith("Starting")
+                          ? "COUNTDOWN"
+                          : "STOPPING"
+                      : "LIVE VIEW"}
+                  </span>
+                  <span>
+                    {rate.toFixed(1)} Hz · maximum gap {maxGap.toFixed(0)} ms
                   </span>
                 </div>
                 <div className="stats">
-                  {stat("VOLTAGE", sample.voltage, "V", <Zap size={13} />)}
-                  {stat("CURRENT", sample.current, "A", <Activity size={13} />)}
-                  {stat("POWER", sample.power, "W", <Gauge size={13} />)}
-                  {stat("THRUST", sample.thrustG, "g", <Scale size={13} />, 1)}
-                  {stat("EFFICIENCY", efficiency, "g/W", <Radio size={13} />)}
+                  {stat("Voltage", sample.voltage, "V", <Zap size={13} />)}
+                  {stat("Current", sample.current, "A", <Activity size={13} />)}
+                  {stat("Power", sample.power, "W", <Gauge size={13} />)}
                   {stat(
-                    "THROTTLE",
+                    "Thrust",
+                    sample.thrustG === undefined
+                      ? undefined
+                      : sample.thrustG * loadUnits[loadUnit].factor,
+                    loadUnit,
+                    <Scale size={13} />,
+                    2,
+                  )}
+                  {stat("Efficiency", efficiency, "g/W", <Radio size={13} />)}
+                  {stat(
+                    "Throttle",
                     sample.throttle ?? 0,
                     "%",
                     <SlidersHorizontal size={13} />,
@@ -700,100 +634,26 @@ export default function App() {
                   )}
                 </div>
                 <div className="chart-toolbar">
-                  <span className="subtle">
-                    {selected.length > 1
-                      ? "Current and thrust are aggregate measurements."
-                      : "FC current includes board consumption."}
-                  </span>
-                  <select
-                    aria-label="Chart measurement"
-                    value={metric}
-                    onChange={(e) => setMetric(e.target.value as typeof metric)}
-                  >
-                    <option value="current">Current / A</option>
-                    <option value="voltage">Voltage / V</option>
-                    <option value="power">Power / W</option>
-                    <option value="thrustG">Thrust / g</option>
-                  </select>
+                  <MetricSelector
+                    selected={selectedMetrics}
+                    onChange={setSelectedMetrics}
+                    unit={loadUnit}
+                  />
                 </div>
-                <div className="chart">
-                  {points.length ? (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={points}>
-                        <CartesianGrid
-                          stroke="#26303b"
-                          strokeDasharray="3 5"
-                          vertical={false}
-                        />
-                        <XAxis
-                          dataKey="seconds"
-                          tickFormatter={(v) => `${v.toFixed(0)}s`}
-                          stroke="#748293"
-                          minTickGap={35}
-                        />
-                        <YAxis
-                          yAxisId="measurement"
-                          stroke="#748293"
-                          width={45}
-                        />
-                        <YAxis
-                          yAxisId="throttle"
-                          orientation="right"
-                          domain={[0, 100]}
-                          stroke="#748293"
-                          unit="%"
-                          width={45}
-                        />
-                        <Tooltip
-                          contentStyle={{
-                            background: "#141b24",
-                            border: "1px solid #354253",
-                            borderRadius: 8,
-                          }}
-                          labelFormatter={(v) => `${Number(v).toFixed(2)}s`}
-                        />
-                        <Line
-                          yAxisId="measurement"
-                          dataKey={metric}
-                          stroke="#77b7ff"
-                          dot={false}
-                          strokeWidth={2}
-                          isAnimationActive={false}
-                          connectNulls={false}
-                        />
-                        <Line
-                          yAxisId="throttle"
-                          dataKey="throttle"
-                          stroke="#b6f36a"
-                          dot={false}
-                          strokeWidth={1.5}
-                          isAnimationActive={false}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div className="empty-chart">
-                      <Activity size={30} />
-                      <strong>Your next test starts here</strong>
-                      <span>
-                        Run a profile to plot throttle and measurements over
-                        time.
-                      </span>
-                    </div>
-                  )}
-                </div>
+                <MeasurementsChart
+                  series={[
+                    {
+                      id: "live",
+                      name: identity?.simulated ? "Simulator" : "Run",
+                      samples: samples.slice(-3000),
+                    },
+                  ]}
+                  selected={selectedMetrics}
+                  unit={loadUnit}
+                />
                 <div className="telemetry-footer">
-                  <span className="status">
-                    <span className={"dot " + (running ? "green" : "")} />
-                    {status}
-                  </span>
-                  <span>
-                    {(elapsed / 1000).toFixed(1)} s /{" "}
-                    {(duration(activeRun?.profile ?? profile) / 1000).toFixed(
-                      1,
-                    )}{" "}
-                    s
-                  </span>
+                  <span>{status}</span>
+                  <span>{(elapsed / 1000).toFixed(2)} s</span>
                   {activeRun && (
                     <div className="actions">
                       <button
@@ -806,7 +666,7 @@ export default function App() {
                           )
                         }
                       >
-                        <ArrowDownToLine size={13} /> CSV
+                        CSV
                       </button>
                       <button
                         disabled={running}
@@ -822,31 +682,26 @@ export default function App() {
                     </div>
                   )}
                 </div>
+                <p className="subtle">
+                  Current and thrust are totals for all selected motors. FC
+                  current includes board consumption.
+                </p>
               </section>
             </>
           )}
           {tab === "history" && (
             <section className="panel history-panel">
               <div className="section-heading">
-                <div>
-                  <Activity size={18} />
-                  <h2>Saved runs</h2>
-                </div>
+                <h2>Saved runs</h2>
                 <button
-                  disabled={busy || running}
+                  disabled={running || busy}
                   onClick={() => input.current?.click()}
                 >
                   <ArrowUpFromLine size={14} /> Import JSON
                 </button>
               </div>
               {!runs.length ? (
-                <div className="empty-chart">
-                  <Activity size={30} />
-                  <strong>A clean slate</strong>
-                  <span>
-                    Your completed and interrupted tests will appear here.
-                  </span>
-                </div>
+                <p>No saved runs.</p>
               ) : (
                 <>
                   <div className="run-list">
@@ -873,7 +728,7 @@ export default function App() {
                           </strong>
                           <p>
                             {new Date(r.startedAt).toLocaleString()} · M
-                            {r.selected.map((i) => i + 1).join(", M")} ·{" "}
+                            {r.selected.map((n) => n + 1).join(", M")} ·{" "}
                             {r.samples.length} samples
                           </p>
                           <small>
@@ -909,7 +764,7 @@ export default function App() {
                               })
                             }
                           >
-                            <Trash2 size={15} />
+                            <Trash2 size={14} />
                           </button>
                         </div>
                       </article>
@@ -917,96 +772,23 @@ export default function App() {
                   </div>
                   {overlays.length > 0 && (
                     <>
-                      <div className="chart-toolbar">
-                        <h3>Run comparison · seconds from start</h3>
-                        <select
-                          aria-label="Comparison measurement"
-                          value={metric}
-                          onChange={(e) =>
-                            setMetric(e.target.value as typeof metric)
-                          }
-                        >
-                          <option value="current">Current / A</option>
-                          <option value="voltage">Voltage / V</option>
-                          <option value="power">Power / W</option>
-                          <option value="thrustG">Thrust / g</option>
-                        </select>
-                      </div>
-                      <div className="chart">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <LineChart>
-                            <CartesianGrid stroke="#26303b" vertical={false} />
-                            <XAxis
-                              type="number"
-                              dataKey="seconds"
-                              domain={["dataMin", "dataMax"]}
-                              stroke="#748293"
-                              unit="s"
-                            />
-                            <YAxis stroke="#748293" />
-                            <Tooltip
-                              contentStyle={{
-                                background: "#141b24",
-                                border: "1px solid #354253",
-                              }}
-                            />
-                            {runs
-                              .filter((r) => overlays.includes(r.id))
-                              .map((r, i) => (
-                                <Line
-                                  key={r.id}
-                                  name={`${r.profile.name} · ${new Date(r.startedAt).toLocaleTimeString()}`}
-                                  data={r.samples
-                                    .filter(
-                                      (_, n) =>
-                                        n %
-                                          Math.max(
-                                            1,
-                                            Math.floor(r.samples.length / 1000),
-                                          ) ===
-                                        0,
-                                    )
-                                    .map((s) => ({
-                                      ...s,
-                                      seconds: s.t / 1000,
-                                    }))}
-                                  dataKey={metric}
-                                  stroke={
-                                    [
-                                      "#b6f36a",
-                                      "#77b7ff",
-                                      "#f6bb75",
-                                      "#cd99f6",
-                                    ][i % 4]
-                                  }
-                                  dot={false}
-                                  isAnimationActive={false}
-                                  connectNulls={false}
-                                />
-                              ))}
-                          </LineChart>
-                        </ResponsiveContainer>
-                      </div>
-                      <div className="comparison-legend">
-                        {runs
+                      <h3>Run comparison</h3>
+                      <MetricSelector
+                        selected={selectedMetrics}
+                        onChange={setSelectedMetrics}
+                        unit={loadUnit}
+                      />
+                      <MeasurementsChart
+                        series={runs
                           .filter((r) => overlays.includes(r.id))
-                          .map((r, i) => (
-                            <span
-                              key={r.id}
-                              style={{
-                                color: [
-                                  "#b6f36a",
-                                  "#77b7ff",
-                                  "#f6bb75",
-                                  "#cd99f6",
-                                ][i % 4],
-                              }}
-                            >
-                              ● {r.profile.name} ·{" "}
-                              {new Date(r.startedAt).toLocaleTimeString()}
-                            </span>
-                          ))}
-                      </div>
+                          .map((r) => ({
+                            id: r.id,
+                            name: `${r.profile.name} ${new Date(r.startedAt).toLocaleTimeString()}`,
+                            samples: r.samples,
+                          }))}
+                        selected={selectedMetrics}
+                        unit={loadUnit}
+                      />
                     </>
                   )}
                 </>
@@ -1017,37 +799,54 @@ export default function App() {
             <div className="loadcell-grid">
               <section className="panel">
                 <div className="section-heading">
-                  <div>
-                    <Scale size={19} />
-                    <h2>HX711 calibration</h2>
-                  </div>
-                  <span className="pill">
-                    {identity?.hx711 ? "SUPPORTED" : "OPTIONAL FIRMWARE"}
-                  </span>
+                  <h2>Calibration</h2>
+                  <label>
+                    Units{" "}
+                    <select
+                      aria-label="Load cell units"
+                      value={loadUnit}
+                      onChange={(e) => {
+                        const unit = e.target.value as LoadUnit;
+                        setLoadUnit(unit);
+                        localStorage.setItem("load-unit", unit);
+                      }}
+                    >
+                      {Object.keys(loadUnits).map((u) => (
+                        <option key={u} value={u}>
+                          {u}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
                 <div className="loadcell-reading">
-                  {fmt(sample.thrustG, 2)}
-                  <span>grams</span>
+                  {fmt(
+                    sample.thrustG === undefined
+                      ? undefined
+                      : sample.thrustG * loadUnits[loadUnit].factor,
+                    3,
+                  )}{" "}
+                  <span>{loadUnit}</span>
                 </div>
                 <p className="subtle">
                   {sample.hxValid
-                    ? "Fresh, calibrated measurement"
+                    ? "Fresh measurement"
                     : identity?.hx711
-                      ? "Waiting for a valid calibrated sample"
-                      : "Connect an FC built with USE_HX711, or try the simulator."}
+                      ? "Waiting for valid samples and calibration"
+                      : "Requires USE_HX711 firmware"}
                 </p>
                 <div className="calibration-steps">
                   <div>
-                    <span className="step">1</span>
                     <div>
-                      <h3>Zero the empty stand</h3>
-                      <p>Remove external loads and let the stand settle.</p>
+                      <h3>Tare</h3>
+                      <p>Remove the load and let the stand settle.</p>
                     </div>
                     <button
                       disabled={!identity?.hx711 || running || busy}
                       onClick={() =>
                         void action(async () => {
                           await device!.tare();
+                          setSample(await device!.sample());
                           setStatus("Tare complete — calibration is unsaved");
                         })
                       }
@@ -1056,21 +855,26 @@ export default function App() {
                     </button>
                   </div>
                   <div>
-                    <span className="step">2</span>
                     <div>
-                      <h3>Apply a known weight</h3>
-                      <p>Use the same load direction as the measured thrust.</p>
+                      <h3>Known load</h3>
                       <label className="mass-input">
                         <input
-                          aria-label="Known weight in grams"
+                          aria-label="Known calibration load"
                           type="number"
                           min="0.001"
-                          step="0.001"
-                          value={mass}
+                          step="any"
+                          value={Number(
+                            (mass * loadUnits[loadUnit].factor).toPrecision(8),
+                          )}
                           disabled={running || busy}
-                          onChange={(e) => setMass(Number(e.target.value))}
+                          onChange={(e) =>
+                            setMass(
+                              Number(e.target.value) /
+                                loadUnits[loadUnit].factor,
+                            )
+                          }
                         />{" "}
-                        g
+                        {loadUnit}
                       </label>
                     </div>
                     <button
@@ -1080,6 +884,7 @@ export default function App() {
                       onClick={() =>
                         void action(async () => {
                           await device!.calibrate(mass);
+                          setSample(await device!.sample());
                           setStatus("Calibration complete — save to retain it");
                         })
                       }
@@ -1088,16 +893,16 @@ export default function App() {
                     </button>
                   </div>
                   <div>
-                    <span className="step">3</span>
                     <div>
-                      <h3>Save to the flight controller</h3>
-                      <p>Tare and scale are retained after power cycling.</p>
+                      <h3>Save calibration</h3>
+                      <p>Stored in this browser for this FC. Logs use grams.</p>
                     </div>
                     <button
                       disabled={!identity?.hx711 || running || busy}
                       onClick={() =>
                         void action(async () => {
                           await device!.saveCalibration();
+                          setSample(await device!.sample());
                           setStatus("Calibration saved and verified");
                         })
                       }
@@ -1120,7 +925,7 @@ export default function App() {
                     <dd>{device?.calibration?.offset ?? "—"}</dd>
                   </div>
                   <div>
-                    <dt>Saved to FC</dt>
+                    <dt>Saved in browser</dt>
                     <dd>{device?.calibration?.saved ? "Yes" : "No"}</dd>
                   </div>
                   <div>
@@ -1128,75 +933,13 @@ export default function App() {
                     <dd>{sample.hxAgeMs ?? "—"} ms</dd>
                   </div>
                 </dl>
-                <p className="status">
-                  {busy ? "Capturing stable samples…" : status}
-                </p>
+                <p className="status">{busy ? "Capturing samples…" : status}</p>
               </section>
-              <section className="panel wiring">
-                <div className="section-heading">
-                  <div>
-                    <Cable size={18} />
-                    <h2>CLRACINGF4 wiring</h2>
-                  </div>
-                </div>
-                <p>
-                  Build with <code>USE_HX711</code>. USB remains the MSP
-                  connection; the UART4 pads become GPIO resources.
-                </p>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>FC pad</th>
-                      <th>HX711</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td>TX4 / PA0</td>
-                      <td>PD_SCK</td>
-                    </tr>
-                    <tr>
-                      <td>RX4 / PA1</td>
-                      <td>DOUT / DT</td>
-                    </tr>
-                    <tr>
-                      <td>GND</td>
-                      <td>GND</td>
-                    </tr>
-                    <tr>
-                      <td>Compatible supply</td>
-                      <td>VCC / VDD</td>
-                    </tr>
-                  </tbody>
-                </table>
-                <p className="subtle">
-                  FC GPIO uses 3.3 V logic. Check your module’s supply and logic
-                  requirements; do not feed a 5 V DOUT into the FC.
-                </p>
-                <h3>Betaflight CLI</h3>
-                <p>
-                  Disable UART4 functions, release its resources, then assign
-                  and save:
-                </p>
-                <pre>
-                  {
-                    "serial 3 0 115200 57600 0 115200\nresource SERIAL_TX 4 NONE\nresource SERIAL_RX 4 NONE\nresource HX711_SCK 1 A00\nresource HX711_DOUT 1 A01\nsave"
-                  }
-                </pre>
-                <p className="subtle">
-                  This reboots the FC. HX711 RATE selects 10 or 80 samples/s on
-                  the module. Capture requires stopped motors and stable fresh
-                  samples.
-                </p>
-                <a
-                  href="https://github.com/FractalEngineer/Betabench/tree/main/firmware"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Firmware build and restoration guide{" "}
-                  <ChevronRight size={14} />
-                </a>
-              </section>
+              <Suspense
+                fallback={<section className="panel">Loading targets…</section>}
+              >
+                <ResourceSetup />
+              </Suspense>
             </div>
           )}
           <input
@@ -1210,13 +953,6 @@ export default function App() {
               if (file) void importFile(file);
             }}
           />
-          <footer>
-            <span>
-              <Activity size={13} /> BETABENCH
-            </span>
-            <span>Built for the bench. Made to measure.</span>
-            <span>LOCAL STORAGE · NO CLOUD UPLOADS</span>
-          </footer>
         </div>
       </main>
       {running && (

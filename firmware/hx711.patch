@@ -1,0 +1,595 @@
+From 8644c8aeb9e547e72d10b2d184de6a82cf65df34 Mon Sep 17 00:00:00 2001
+From: Yves <calibratedbeats@gmail.com>
+Date: Sun, 18 Oct 2026 20:23:59 +0800
+Subject: [PATCH] Add opt-in HX711 raw sensor driver, resources and MSP
+ telemetry
+
+---
+ .github/workflows/hx711.yml               | 47 ++++++++++++++++
+ docs/development/HX711.md                 | 40 +++++++++++++
+ mk/source.mk                              |  2 +
+ src/main/cli/cli.c                        |  7 +++
+ src/main/drivers/hx711.c                  | 68 +++++++++++++++++++++++
+ src/main/drivers/hx711.h                  | 18 ++++++
+ src/main/drivers/resource.c               |  4 ++
+ src/main/drivers/resource.h               |  4 ++
+ src/main/fc/init.c                        |  7 +++
+ src/main/fc/tasks.c                       |  6 ++
+ src/main/msp/msp.c                        | 16 ++++++
+ src/main/msp/msp_protocol_v2_betaflight.h |  3 +
+ src/main/pg/hx711.c                       | 10 ++++
+ src/main/pg/hx711.h                       | 10 ++++
+ src/main/pg/pg_ids.h                      |  1 +
+ src/test/hx711/hx711_test.c               | 61 ++++++++++++++++++++
+ src/test/hx711/stubs/drivers/io.h         | 16 ++++++
+ src/test/hx711/stubs/drivers/time.h       |  6 ++
+ src/test/hx711/stubs/pg/hx711.h           |  6 ++
+ src/test/hx711/stubs/platform.h           |  8 +++
+ tools/test-hx711.sh                       |  9 +++
+ 21 files changed, 349 insertions(+)
+ create mode 100644 .github/workflows/hx711.yml
+ create mode 100644 docs/development/HX711.md
+ create mode 100644 src/main/drivers/hx711.c
+ create mode 100644 src/main/drivers/hx711.h
+ create mode 100644 src/main/pg/hx711.c
+ create mode 100644 src/main/pg/hx711.h
+ create mode 100644 src/test/hx711/hx711_test.c
+ create mode 100644 src/test/hx711/stubs/drivers/io.h
+ create mode 100644 src/test/hx711/stubs/drivers/time.h
+ create mode 100644 src/test/hx711/stubs/pg/hx711.h
+ create mode 100644 src/test/hx711/stubs/platform.h
+ create mode 100644 tools/test-hx711.sh
+
+diff --git a/.github/workflows/hx711.yml b/.github/workflows/hx711.yml
+new file mode 100644
+index 000000000..207b42758
+--- /dev/null
++++ b/.github/workflows/hx711.yml
+@@ -0,0 +1,47 @@
++name: HX711
++on:
++  push:
++    branches: [HX711]
++  pull_request:
++    paths:
++      - '**/*hx711*'
++      - src/main/msp/**
++      - src/main/fc/tasks.c
++      - src/main/fc/init.c
++      - src/main/cli/cli.c
++      - src/main/drivers/resource.*
++      - src/main/pg/pg_ids.h
++      - mk/source.mk
++  workflow_dispatch:
++permissions:
++  contents: read
++jobs:
++  host-test:
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@v4
++      - run: bash tools/test-hx711.sh
++  clracingf4:
++    runs-on: ubuntu-latest
++    strategy:
++      matrix:
++        include:
++          - name: disabled
++            flags: ''
++          - name: hx711
++            flags: '-DUSE_HX711'
++    steps:
++      - uses: actions/checkout@v4
++      - run: git submodule update --init src/config
++      - uses: actions/cache@v4
++        with:
++          path: |
++            tools/arm-gnu-toolchain-13.3.rel1-x86_64-arm-none-eabi
++            downloads/arm-gnu-toolchain-13.3.rel1-x86_64-arm-none-eabi.tar.xz
++          key: arm-gnu-13.3.rel1-linux
++      - run: make arm_sdk_install
++      - run: make CONFIG=CLRACINGF4 EXTRA_FLAGS="${{ matrix.flags }}" -j2
++      - uses: actions/upload-artifact@v4
++        with:
++          name: CLRACINGF4-${{ matrix.name }}
++          path: obj/*.hex
+diff --git a/docs/development/HX711.md b/docs/development/HX711.md
+new file mode 100644
+index 000000000..91f58ffc9
+--- /dev/null
++++ b/docs/development/HX711.md
+@@ -0,0 +1,40 @@
++# HX711 MSP extension — wire version 1
++
++Opt-in `USE_HX711` adds one read-only native MSPv2 command, `MSP2_SENSOR_HX711 = 0x30F0`. This is a project-local allocation and must be reviewed before any upstream proposal. Without the build define, normal MSP unsupported-command handling applies. No Betabench session, motor, tare, calibration or save commands are implemented.
++
++Request payload: empty. Response: exactly 18 bytes, little endian.
++
++| Offset | Type | Field | Units / meaning |
++|---:|---|---|---|
++| 0 | u8 | version | 1 |
++| 1 | u8 | flags | bit 0 configured, bit 1 fresh, bit 2 saturated |
++| 2 | i32 | raw | sign-extended 24-bit ADC count |
++| 6 | u32 | sequence | increments once per completed conversion; wraps |
++| 10 | u32 | age | milliseconds since acquisition; UINT32_MAX before first sample |
++| 14 | u32 | time | acquisition timestamp from micros(); wraps |
++
++Fresh means a conversion exists and its age is at most 250 ms. Saturated means raw is -8388608 or 8388607. A saturated sample may also be fresh; clients must reject saturated values for thrust/calibration. Configured only indicates GPIO initialization succeeded, not that a load cell is producing conversions. Timestamp and sequence belong to HX711 readings, not battery measurements. Sensor RATE remains a hardware choice (10/80 samples/s).
++
++Example response payload:
++
++```text
++01 03 e6 5b ff ff 63 00 00 00 0a 00 00 00 39 30 00 00
++```
++
++Version 1, configured+fresh, raw -42010, sequence 99, age 10 ms, FC timestamp 12345 µs. With browser offset -10 and counts/gram -420, this is +100 g. Request frame (including MSPv2 CRC):
++
++```text
++24 58 3c 00 f0 30 00 00 90
++```
++
++The web app keeps fixed grams in logged measurements and calculates `(raw - offset) / countsPerGram` only for fresh, configured, nonsaturated readings and valid calibration. Browser captures use unique sequences to avoid treating repeated serial reads as independent sensor samples. Tare/calibration/save are local operations after standard MSP confirms disarmed/stopped motors. Save stores and verifies calibration in IndexedDB, keyed by the normal MSP UID response.
++
++Normal motor/electrical operations use standard MSP_SET_MOTOR, MSP_MOTOR, MSP_ARMING_DISABLE, MSP_STATUS, MSP_BATTERY_STATE and optional MSP_MOTOR_TELEMETRY. There is no firmware-side motor-command watchdog in this feature. The old prototype 0x30F0–0x30F7 bench interface is incompatible and has been removed; install the HX711-only firmware when using this UI.
++
++## Building and resources
++
++Build with `make CONFIG=CLRACINGF4 EXTRA_FLAGS="-DUSE_HX711"`. Without the define the feature is disabled. Use ARM GNU 13.3.Rel1. Run `bash tools/test-hx711.sh` for simulated GPIO tests.
++
++Persistent PG 572 stores only `sckTag` and `doutTag`. Resources `HX711_SCK` and `HX711_DOUT` start unassigned. Release existing resource owners before assigning compatible 3.3 V GPIO. On CLRACINGF4, UART4 TX/PA0 and RX/PA1 can be released and mapped to SCK/A00 and DOUT/A01. Use Save/Reboot. No target configuration is changed. Channel A/gain 128 and hardware-selected 10/80 Hz are supported.
++
++No physical hardware validation has been performed. Verify logic voltage, clock timing, signed counts, noise and sensor accuracy on the actual stand.
+diff --git a/mk/source.mk b/mk/source.mk
+index 9cdf299a7..854c571ae 100644
+--- a/mk/source.mk
++++ b/mk/source.mk
+@@ -1,4 +1,5 @@
+ PG_SRC = \
++            pg/hx711.c \
+             pg/adc.c \
+             pg/alt_hold_multirotor.c \
+             pg/alt_hold_wing.c \
+@@ -57,6 +58,7 @@ PG_SRC = \
+             pg/vtx_table.c
+ 
+ COMMON_SRC = \
++            drivers/hx711.c \
+             build/build_config.c \
+             build/debug.c \
+             build/version.c \
+diff --git a/src/main/cli/cli.c b/src/main/cli/cli.c
+index ce8cffc7d..75cbb9069 100644
+--- a/src/main/cli/cli.c
++++ b/src/main/cli/cli.c
+@@ -76,6 +76,9 @@ bool cliMode = false;
+ #include "drivers/flash/flash.h"
+ #include "drivers/inverter.h"
+ #include "drivers/io.h"
++#ifdef USE_HX711
++#include "pg/hx711.h"
++#endif
+ #include "drivers/io_impl.h"
+ #include "drivers/lcd_console.h"
+ #include "drivers/light_led.h"
+@@ -7066,6 +7069,10 @@ typedef struct {
+     { owner, pgn, sizeof(type), offsetof(type, member), max }
+ 
+ const cliResourceValue_t resourceTable[] = {
++#ifdef USE_HX711
++    DEFS( OWNER_HX711_SCK, PG_HX711_CONFIG, hx711Config_t, sckTag ),
++    DEFS( OWNER_HX711_DOUT, PG_HX711_CONFIG, hx711Config_t, doutTag ),
++#endif
+ #if defined(USE_BEEPER)
+     DEFS( OWNER_BEEPER,        PG_BEEPER_DEV_CONFIG, beeperDevConfig_t, ioTag ),
+ #endif
+diff --git a/src/main/drivers/hx711.c b/src/main/drivers/hx711.c
+new file mode 100644
+index 000000000..fe510b807
+--- /dev/null
++++ b/src/main/drivers/hx711.c
+@@ -0,0 +1,68 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++#include "platform.h"
++#ifdef USE_HX711
++#include "drivers/io.h"
++#include "drivers/time.h"
++#include "drivers/hx711.h"
++#include "pg/hx711.h"
++
++static IO_t sck, dout;
++static bool configured, saturated;
++static int32_t raw;
++static uint32_t sequence, lastSampleMs, lastSampleUs;
++
++void hx711Init(void)
++{
++    const hx711Config_t *config = hx711Config();
++    sck = IOGetByTag(config->sckTag);
++    dout = IOGetByTag(config->doutTag);
++    if (!sck || !dout || sck == dout || !IOIsFreeOrPreinit(sck) || !IOIsFreeOrPreinit(dout)) {
++        return;
++    }
++    IOInit(sck, OWNER_HX711_SCK, 0);
++    IOInit(dout, OWNER_HX711_DOUT, 0);
++    IOLo(sck);
++    IOConfigGPIO(sck, IOCFG_OUT_PP);
++    IOConfigGPIO(dout, IOCFG_IPU);
++    configured = true;
++}
++
++void hx711Update(void)
++{
++    // Do not wait for a conversion; only clock a completed sample.
++    if (!configured || IORead(dout)) {
++        return;
++    }
++    uint32_t bits = 0;
++    for (unsigned i = 0; i < 25; i++) {
++        // Protect only each high pulse. HX711 powers down if SCK is high
++        // for >60us. Interrupts remain enabled during conversion waiting.
++        const uint32_t primask = __get_PRIMASK();
++        __disable_irq();
++        IOHi(sck);
++        delayMicroseconds(1);
++        if (i < 24) {
++            bits = (bits << 1) | (IORead(dout) ? 1 : 0);
++        }
++        IOLo(sck);
++        __set_PRIMASK(primask);
++        delayMicroseconds(1);
++    }
++    raw = (int32_t)(bits & 0x7fffff) - (int32_t)(bits & 0x800000);
++    saturated = raw == -8388608 || raw == 8388607;
++    lastSampleUs = micros();
++    lastSampleMs = millis();
++    sequence++;
++}
++
++void hx711GetSample(hx711Sample_t *sample)
++{
++    sample->ageMs = sequence ? (uint32_t)(millis() - lastSampleMs) : UINT32_MAX;
++    sample->flags = (configured ? HX711_CONFIGURED : 0)
++        | (sequence && sample->ageMs <= 250 ? HX711_FRESH : 0)
++        | (saturated ? HX711_SATURATED : 0);
++    sample->raw = raw;
++    sample->sequence = sequence;
++    sample->timeUs = lastSampleUs;
++}
++#endif
+diff --git a/src/main/drivers/hx711.h b/src/main/drivers/hx711.h
+new file mode 100644
+index 000000000..a62f7cb60
+--- /dev/null
++++ b/src/main/drivers/hx711.h
+@@ -0,0 +1,18 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++#pragma once
++#include <stdbool.h>
++#include <stdint.h>
++#define HX711_CONFIGURED 1
++#define HX711_FRESH 2
++#define HX711_SATURATED 4
++
++typedef struct hx711Sample_s {
++    uint8_t flags;
++    int32_t raw;
++    uint32_t sequence;
++    uint32_t ageMs;
++    uint32_t timeUs;
++} hx711Sample_t;
++void hx711Init(void);
++void hx711Update(void);
++void hx711GetSample(hx711Sample_t *sample);
+diff --git a/src/main/drivers/resource.c b/src/main/drivers/resource.c
+index 9fb4200cf..e29fe10b3 100644
+--- a/src/main/drivers/resource.c
++++ b/src/main/drivers/resource.c
+@@ -124,6 +124,10 @@ static const char * const ownerNames[] = {
+     [OWNER_CAN_TX] = "CAN_TX",
+     [OWNER_CAN_RX] = "CAN_RX",
+     [OWNER_CAN_SILENT] = "CAN_SILENT",
++#ifdef USE_HX711
++    [OWNER_HX711_SCK] = "HX711_SCK",
++    [OWNER_HX711_DOUT] = "HX711_DOUT",
++#endif
+     // Keep in sync with resourceOwner_e.
+ };
+ 
+diff --git a/src/main/drivers/resource.h b/src/main/drivers/resource.h
+index e30e2b536..2a306a2db 100644
+--- a/src/main/drivers/resource.h
++++ b/src/main/drivers/resource.h
+@@ -120,6 +120,10 @@ typedef enum {
+     OWNER_CAN_TX,                // TX must be just before RX
+     OWNER_CAN_RX,
+     OWNER_CAN_SILENT,
++#ifdef USE_HX711
++    OWNER_HX711_SCK,
++    OWNER_HX711_DOUT,
++#endif
+     OWNER_TOTAL_COUNT
+ } resourceOwner_e;
+ 
+diff --git a/src/main/fc/init.c b/src/main/fc/init.c
+index aaf3e76a2..c7afef945 100644
+--- a/src/main/fc/init.c
++++ b/src/main/fc/init.c
+@@ -159,6 +159,9 @@
+ #include "pg/mco.h"
+ #include "pg/motor.h"
+ #include "pg/pinio.h"
++#ifdef USE_HX711
++#include "drivers/hx711.h"
++#endif
+ #include "pg/piniobox.h"
+ #include "pg/pin_pull_up_down.h"
+ #include "pg/pg.h"
+@@ -1076,6 +1079,10 @@ void initPhase3(void)
+ 
+     debugInit();
+ 
++#ifdef USE_HX711
++    hx711Init();
++#endif
++
+ #if ENABLE_UNUSED_PINS_INIT
+     unusedPinsInit();
+ #endif
+diff --git a/src/main/fc/tasks.c b/src/main/fc/tasks.c
+index d60ff7da3..732971d9a 100644
+--- a/src/main/fc/tasks.c
++++ b/src/main/fc/tasks.c
+@@ -119,6 +119,9 @@
+ #endif
+ 
+ #include "tasks.h"
++#ifdef USE_HX711
++#include "drivers/hx711.h"
++#endif
+ 
+ // taskUpdateRxMain() has occasional peaks in execution time so normal moving average duration estimation doesn't work
+ // Decay the estimated max task duration by 1/(1 << RX_TASK_DECAY_SHIFT) on every invocation
+@@ -158,6 +161,9 @@ static void taskHandleSerial(timeUs_t currentTimeUs)
+ 
+     bool evaluateMspData = ARMING_FLAG(ARMED) ? MSP_SKIP_NON_MSP_DATA : MSP_EVALUATE_NON_MSP_DATA;
+     mspSerialProcess(evaluateMspData, mspFcProcessCommand, mspFcProcessReply);
++#ifdef USE_HX711
++    hx711Update();
++#endif
+ }
+ 
+ static void taskBatteryAlerts(timeUs_t currentTimeUs)
+diff --git a/src/main/msp/msp.c b/src/main/msp/msp.c
+index b7d5d08ac..227def2a3 100644
+--- a/src/main/msp/msp.c
++++ b/src/main/msp/msp.c
+@@ -27,6 +27,9 @@
+ #include <ctype.h>
+ 
+ #include "platform.h"
++#ifdef USE_HX711
++#include "drivers/hx711.h"
++#endif
+ 
+ #include "blackbox/blackbox.h"
+ #include "blackbox/blackbox_io.h"
+@@ -844,6 +847,19 @@ RAM_CODE static bool mspCommonProcessOutCommand(mspDescriptor_t srcDesc, int16_t
+         sbufWriteBuildInfoFlags(dst);
+         break;
+ 
++#ifdef USE_HX711
++    case MSP2_SENSOR_HX711: {
++        hx711Sample_t sample;
++        hx711GetSample(&sample);
++        sbufWriteU8(dst, 1); // HX711 sample wire version
++        sbufWriteU8(dst, sample.flags);
++        sbufWriteU32(dst, sample.raw);
++        sbufWriteU32(dst, sample.sequence);
++        sbufWriteU32(dst, sample.ageMs);
++        sbufWriteU32(dst, sample.timeUs);
++        break;
++    }
++#endif
+     case MSP_ANALOG:
+         sbufWriteU8(dst, (uint8_t)constrain(getLegacyBatteryVoltage(), 0, 255));
+         sbufWriteU16(dst, (uint16_t)constrain(getMAhDrawn(), 0, 0xFFFF)); // milliamp hours drawn from battery
+diff --git a/src/main/msp/msp_protocol_v2_betaflight.h b/src/main/msp/msp_protocol_v2_betaflight.h
+index 3e0599497..e7957d15e 100644
+--- a/src/main/msp/msp_protocol_v2_betaflight.h
++++ b/src/main/msp/msp_protocol_v2_betaflight.h
+@@ -53,3 +53,6 @@
+ #define CUSTOM_MSG_MAX_NUM                       4
+ #define MSP2TEXT_BATTERY_PROFILE_NAME        11
+ // next new variable type must be >= MSP2TEXT_BATTERY_PROFILE_NAME + 1 (12)
++
++// Project-local HX711 raw sample extension, wire version 1.
++#define MSP2_SENSOR_HX711                  0x30F0
+diff --git a/src/main/pg/hx711.c b/src/main/pg/hx711.c
+new file mode 100644
+index 000000000..3eac0d445
+--- /dev/null
++++ b/src/main/pg/hx711.c
+@@ -0,0 +1,10 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++#include "platform.h"
++#ifdef USE_HX711
++#include "pg/pg.h"
++#include "pg/pg_ids.h"
++#include "pg/hx711.h"
++
++// Zero defaults leave both resources unassigned.
++PG_REGISTER(hx711Config_t, hx711Config, PG_HX711_CONFIG, 0);
++#endif
+diff --git a/src/main/pg/hx711.h b/src/main/pg/hx711.h
+new file mode 100644
+index 000000000..9363169ab
+--- /dev/null
++++ b/src/main/pg/hx711.h
+@@ -0,0 +1,10 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++#pragma once
++#include "drivers/io_types.h"
++#include "pg/pg.h"
++
++typedef struct hx711Config_s {
++    ioTag_t sckTag;
++    ioTag_t doutTag;
++} hx711Config_t;
++PG_DECLARE(hx711Config_t, hx711Config);
+diff --git a/src/main/pg/pg_ids.h b/src/main/pg/pg_ids.h
+index 5854747a3..82c6ed412 100644
+--- a/src/main/pg/pg_ids.h
++++ b/src/main/pg/pg_ids.h
+@@ -169,6 +169,7 @@
+ #define PG_PITOT_CONFIG             569
+ #define PG_LAUNCH_WING_CONFIG       570
+ #define PG_AUTOPILOT_WING           571
++#define PG_HX711_CONFIG             572
+ 
+ // TODO TBC
+ #define PG_DISPLAY_PORT_FBOSD_CONFIG 566
+diff --git a/src/test/hx711/hx711_test.c b/src/test/hx711/hx711_test.c
+new file mode 100644
+index 000000000..ae09b9129
+--- /dev/null
++++ b/src/test/hx711/hx711_test.c
+@@ -0,0 +1,61 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++// Executes the production driver with simulated GPIO and monotonic time.
++#include <assert.h>
++#include <stdio.h>
++#include "platform.h"
++#include "drivers/io.h"
++#include "drivers/hx711.h"
++#include "pg/hx711.h"
++
++uint32_t testPrimask;
++static uint32_t now, bits;
++static unsigned pulses, reads, owners[3];
++static bool ready, high;
++static hx711Config_t config = { 1, 2 };
++uint32_t millis(void) { return now; }
++uint32_t micros(void) { return now * 1000; }
++void delayMicroseconds(uint32_t us) { assert(us == 1); if (high) assert(testPrimask == 1); }
++const hx711Config_t *hx711Config(void) { return &config; }
++IO_t IOGetByTag(uint8_t tag) { return tag < 3 ? tag : 0; }
++bool IOIsFreeOrPreinit(IO_t io) { return !owners[io]; }
++void IOInit(IO_t io, unsigned owner, unsigned index) { (void)index; owners[io] = owner; }
++void IOConfigGPIO(IO_t io, unsigned cfg) { (void)io; (void)cfg; }
++void IOHi(IO_t io) { assert(io == 1 && testPrimask == 1); high = true; pulses++; }
++void IOLo(IO_t io) { assert(io == 1); high = false; if (pulses == 25) ready = false; }
++bool IORead(IO_t io) {
++    assert(io == 2);
++    if (!high) return !ready;
++    assert(reads < 24);
++    return !!(bits & (1u << (23 - reads++)));
++}
++static hx711Sample_t sample(void) { hx711Sample_t s; hx711GetSample(&s); return s; }
++static void feed(int32_t value) {
++    const uint32_t primask = testPrimask;
++    bits = value & 0xffffff; ready = true; pulses = reads = 0;
++    hx711Update();
++    assert(pulses == 25 && reads == 24 && !high && testPrimask == primask);
++    assert(sample().raw == value);
++}
++int main(void) {
++    config.sckTag = 0; hx711Init(); assert(!(sample().flags & HX711_CONFIGURED));
++    config.sckTag = config.doutTag = 1; hx711Init(); assert(!(sample().flags & HX711_CONFIGURED));
++    config.doutTag = 2; owners[1] = 99; hx711Init(); assert(!(sample().flags & HX711_CONFIGURED));
++    owners[1] = 0; hx711Init();
++    assert(sample().flags == HX711_CONFIGURED && sample().ageMs == UINT32_MAX);
++    hx711Update(); assert(pulses == 0); // Not-ready reads never generate clocks.
++    now = 100; feed(0); assert(sample().sequence == 1 && sample().timeUs == 100000);
++    feed(-1); feed(-8388608); assert(sample().flags & HX711_SATURATED);
++    feed(8388607); assert(sample().flags & HX711_SATURATED);
++    feed(-42000); assert(!(sample().flags & HX711_SATURATED));
++    now += 250; assert(sample().flags & HX711_FRESH);
++    now++; assert(!(sample().flags & HX711_FRESH));
++    const uint32_t sequence = sample().sequence;
++    for (unsigned i = 0; i < 80; i++) { now += 13; feed(100 + i); }
++    for (unsigned i = 0; i < 10; i++) { now += 100; feed(-100 - (int)i); }
++    assert(sample().sequence == sequence + 90);
++    now = UINT32_MAX - 100; feed(10); now = 149; assert(sample().ageMs == 250 && (sample().flags & HX711_FRESH));
++    now++; assert(!(sample().flags & HX711_FRESH));
++    testPrimask = 1; feed(42); assert(testPrimask == 1);
++    puts("PASS: HX711 readiness, 24-bit polarity, 25 pulses, IRQ protection, resources, rates and freshness/wrap");
++    return 0;
++}
+diff --git a/src/test/hx711/stubs/drivers/io.h b/src/test/hx711/stubs/drivers/io.h
+new file mode 100644
+index 000000000..f5e26a7cc
+--- /dev/null
++++ b/src/test/hx711/stubs/drivers/io.h
+@@ -0,0 +1,16 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++#pragma once
++#include <stdint.h>
++#include <stdbool.h>
++typedef unsigned IO_t;
++#define OWNER_HX711_SCK 1
++#define OWNER_HX711_DOUT 2
++#define IOCFG_OUT_PP 1
++#define IOCFG_IPU 2
++IO_t IOGetByTag(uint8_t tag);
++bool IOIsFreeOrPreinit(IO_t io);
++void IOInit(IO_t io, unsigned owner, unsigned index);
++void IOConfigGPIO(IO_t io, unsigned cfg);
++void IOLo(IO_t io);
++void IOHi(IO_t io);
++bool IORead(IO_t io);
+diff --git a/src/test/hx711/stubs/drivers/time.h b/src/test/hx711/stubs/drivers/time.h
+new file mode 100644
+index 000000000..078b46bdc
+--- /dev/null
++++ b/src/test/hx711/stubs/drivers/time.h
+@@ -0,0 +1,6 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++#pragma once
++#include <stdint.h>
++uint32_t millis(void);
++uint32_t micros(void);
++void delayMicroseconds(uint32_t value);
+diff --git a/src/test/hx711/stubs/pg/hx711.h b/src/test/hx711/stubs/pg/hx711.h
+new file mode 100644
+index 000000000..bddaf0e31
+--- /dev/null
++++ b/src/test/hx711/stubs/pg/hx711.h
+@@ -0,0 +1,6 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++#pragma once
++#include <stdint.h>
++typedef struct { uint8_t sckTag, doutTag;  } hx711Config_t;
++const hx711Config_t *hx711Config(void);
++hx711Config_t *hx711ConfigMutable(void);
+diff --git a/src/test/hx711/stubs/platform.h b/src/test/hx711/stubs/platform.h
+new file mode 100644
+index 000000000..d8cfdb551
+--- /dev/null
++++ b/src/test/hx711/stubs/platform.h
+@@ -0,0 +1,8 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++#pragma once
++#include <stdbool.h>
++#include <stdint.h>
++extern uint32_t testPrimask;
++static inline uint32_t __get_PRIMASK(void) { return testPrimask; }
++static inline void __disable_irq(void) { testPrimask=1; }
++static inline void __set_PRIMASK(uint32_t value) { testPrimask=value; }
+diff --git a/tools/test-hx711.sh b/tools/test-hx711.sh
+new file mode 100644
+index 000000000..a3568ac91
+--- /dev/null
++++ b/tools/test-hx711.sh
+@@ -0,0 +1,9 @@
++#!/usr/bin/env bash
++set -euo pipefail
++cd "$(dirname "$0")/.."
++mkdir -p obj/hx711-test
++cc -std=c11 -Wall -Wextra -Werror -DUSE_HX711 \
++  -Isrc/test/hx711/stubs -Isrc/main \
++  src/test/hx711/hx711_test.c src/main/drivers/hx711.c \
++  -o obj/hx711-test/test
++obj/hx711-test/test
+-- 
+2.55.0.windows.3
+

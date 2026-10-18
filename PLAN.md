@@ -1,78 +1,64 @@
 # Betabench implementation plan
 
-## Summary
+Updated 2026-10-18. This revision supersedes the original firmware-session plan.
 
-Build a React/TypeScript/Vite static app in this repository, deployed with GitHub Actions to GitHub Pages. Connect directly to Betaflight over Web Serial in desktop Chrome/Edge. Support stock firmware, plus optional bench-watchdog and HX711 firmware. Store profiles and runs locally with CSV/JSON exports. See `firmware/PROTOCOL.md` and `firmware/README.md` for the implemented interface and build record.
+## Scope
+
+React/TypeScript/Vite static web app, deployed from `main` to GitHub Pages. Desktop Chrome/Edge connects directly using Web Serial. Stock MSP handles motors, arming inhibition and electrical telemetry. All profile playback, logging, tare and calibration run in the browser.
+
+Betaflight changes are limited to an opt-in `USE_HX711` raw sensor driver, persistent GPIO assignments and a read-only MSP sample. No Betabench motor commands, sessions, watchdog, combined telemetry or firmware calibration remain. Browser loss can leave the last motor-test throttle active; keep a physical power cutoff available.
 
 ## Progress checklist
 
-Only mark verification complete when the corresponding check has actually run.
+- [x] Preserve the original Betaflight checkout and unrelated changes; use an isolated worktree.
+- [x] Fetch upstream master and fast-forward the fork's master.
+- [x] Rename the firmware branch `HX711` and rebase onto upstream.
+- [x] Reduce the firmware diff to HX711 support and its tests/documentation.
+- [x] Keep resources unassigned by default; leave board targets unchanged.
+- [x] Implement raw HX711 acquisition and versioned read-only MSP.
+- [x] Move tare, calibration and UID-keyed persistence to IndexedDB in the web app.
+- [x] Match Configurator's yellow and neutral-gray theme; remove promotional headings and subtitles.
+- [x] Replace segment editing with freely draggable time/throttle points and sticky right angles.
+- [x] Preserve ramps, holds, steps, stopped/minimum-running distinction and legacy profile imports.
+- [x] Place import beside profile download.
+- [x] Show independently selectable current, voltage, power and thrust curves together.
+- [x] Add grams, kilograms, newtons and pounds-force display/calibration units; retain grams in logs.
+- [x] Add target/pad selectors and a custom resource-dump CLI generator; remove supply/ground UI rows.
+- [x] Retain stock MSP discovery, priority Stop, 50 Hz worker commands, 20 Hz telemetry and run aborts.
+- [x] Retain incremental run logging, interrupted-run recovery, overlays and CSV/JSON exports.
+- [x] Run HX711 driver host tests.
+- [x] Finish final unit/browser checks and inspect desktop/mobile charts and resource setup.
+- [x] Compile current-upstream CLRACINGF4 with HX711 disabled and enabled; record memory usage.
+- [x] Review and squash firmware into an HX711-only feature commit; push to the fork's `HX711` branch.
+- [x] Export and verify a reproducible firmware patch against the recorded upstream base.
+- [ ] Push the web app to `main`, deploy Pages and verify the public deployment.
+- [ ] Complete physical FC/ESC/HX711 validation.
+  - No physical hardware has been exercised. USB/MSP behavior, sensor timing/noise, known-load accuracy and restrained motor operation remain pending.
 
-- [x] Inspect Betabench and local Betaflight source.
-- [x] Confirm stock MSP motor control and electrical telemetry.
-- [x] Identify missing motor-test disconnect watchdog.
-- [x] Inspect and define the MiniQuadTestBench sequence.
-- [x] Confirm shared curves, browser-local history, and CSV/JSON exports.
-- [x] Confirm CLRACINGF4 UART4 pads for HX711 and USB for MSP.
-- [x] Confirm configurable resource assignments with Save/Reboot.
-- [x] Verify Betaflight fork remote and current checkout state.
-- [x] Save this plan as PLAN.md.
-- [x] Create an isolated firmware checkout and feature branch.
-- [x] Scaffold web app and GitHub Pages deployment.
-- [x] Implement MSP transport and simulator.
-- [x] Implement profile presets and graphical editor.
-- [x] Implement motor control and run lifecycle.
-- [x] Implement telemetry, charts, persistent history, and exports.
-- [x] Implement optional firmware session control and watchdog.
-- [x] Implement HX711 driver and configurable resources.
-- [x] Implement tare, calibration, and persistent save.
-- [x] Complete automated tests and firmware build matrix.
-- [ ] Complete physical FC/HX711 validation.
-  - Pending: no physical FC/load cell was exercised. USB loss, GPIO timing/voltage, sensor accuracy, known-mass calibration, and restrained motor operation require hardware.
-- [ ] Deploy and verify the web UI.
-  - Pending testing/validation before deployment (user request): automatic approval review rejected a direct default-branch push. Pages is configured, and the implementation is on `codex/web-motor-lab` in draft PR https://github.com/FractalEngineer/Betabench/pull/1.
-- [x] Push reviewed firmware commits to the fork feature branch.
-- [x] Record firmware commit, comparison details, and validation for a later PR.
+No upstream Betaflight PR is authorized. The user's latest request authorizes direct web deployment to `main`; firmware stays on `HX711` for later review.
 
-## Firmware branch and PR preparation
+## Profiles and editor
 
-Use `codex/betabench` from base `6dbc4218f` (2026.6.1), in an isolated worktree. Preserve the original detached checkout, modified `src/config`, and untracked `lib/main/dronecan/`. Initialize the clean worktree's config submodule at the base's recorded commit. Leave CLRACINGF4 target configuration unchanged.
+One shared curve drives selected motors; all other outputs receive Stop. Points move on both axes; matching neighbor time makes a vertical step, matching neighbor throttle makes a horizontal hold. Nearby alignments stick; Alt bypasses snapping. Numeric editing, point insertion/deletion, duplication, local save and JSON import/export remain available. Legacy segment profiles migrate to points.
 
-Push only to `myfork` (`https://github.com/FractalEngineer/betaflight`) and track `myfork/codex/betabench`. Keep focused, buildable commits; inspect the complete diff for unrelated content. Record base/feature SHAs, build commands, test results, and comparison details. Export a reproducible patch. Do not open an upstream Betaflight PR or merge the web app PR until testing/validation is complete and the user requests it.
+MiniQuadTestBench: 0–4 s 3.5%; 4–6 s 50%; 6–8 s 3.5%; 8–10 s 75%; 10–12 s 3.5%; 12–14 s 100%; 14–16 s minimum running; 16–22 s minimum→100% ramp; 22–24 s 100%; 24–26 s 3.5%; 26–28 s stopped. The other preset sweeps 0→100→0 over six seconds each way. Attribution remains in THIRD_PARTY_NOTICES.md.
 
-## Web app and profiles
+## Connection and runs
 
-Connection controls, FC identity/capabilities, selected motors, graphical editor, live measurements, run history, and HX711 setup. One curve controls selected motors simultaneously; unselected motors stay stopped. Editor supports draggable throttle/time points, numeric editing, ramps, steps, holds, explicit stops, duplication, and JSON import/export. Stop differs from minimum running throttle. Support conventional DShot; reject 3D/reversible output. Include a simulator sharing the device interface.
+Discover FC identity/API/build/UID, motor count, conventional DShot configuration, armed state and voltage/current sources. Reject reversible/3D configurations. Probe the optional raw HX711 command. Require explicit enable and a three-second countdown before every run; request standard MSP arming inhibition. Abort on cancellation, page hiding, storage/serial failure, command delay >250 ms or telemetry age >500 ms. Never replay missed commands or resume on reconnect.
 
-MQTB preset, relative to Run: 0–4s 3.5%; 4–6s 50%; 6–8s 3.5%; 8–10s 75%; 10–12s 3.5%; 12–14s 100%; 14–16s minimum running; 16–22s minimum→100% ramp; 22–24s 100%; 24–26s 3.5%; 26–28s stopped. Attribute JyeSmith/dshot-esc-tester at `8695f27fb705892a0906acddc60b4a4e8dfb21a3`; preserve applicable notices. Second preset: 0→100→0, six seconds each way, stopped at endpoints. Both editable.
+Log timestamps, requested throttle, requested/transmitted outputs, electrical values, optional RPM/ESC temperature, raw HX711 counts/sequence/age/validity and calibration/profile/FC snapshots. Leave unavailable values empty. Current and thrust are aggregate readings; efficiency requires valid thrust and positive power. CSV units stay fixed; display units do not alter stored measurements.
 
-## Serial, runs, and storage
+## HX711 firmware and browser calibration
 
-MSPv1/v2 framing, checksums, fragmented frames, deadlines, and serialized priority writes. Discover FC/API/version, motor count/config, arming state, measurement sources, and enhanced capabilities before operation. Worker throttle target 50Hz, monotonic timing, abort gaps >250ms, never replay missed commands. Stock MSP_SET_MOTOR with electrical telemetry target 20Hz and optional motor telemetry; enhanced combined samples target 50Hz. Report achieved rates/gaps.
+One HX711, channel A/gain 128; hardware RATE selects 10 or 80 samples/s. Poll readiness without waiting for conversions. Clock each high pulse with interrupts protected, restore prior interrupt state, sign-extend 24 bits, report saturation and freshness. Persist only `HX711_SCK` and `HX711_DOUT` resource assignments. Reject missing, identical or occupied pins during initialization.
 
-Explicit bench enable and countdown, FC disarmed, MSP arming inhibit. Stop on completion/cancel/error/stale telemetry >500ms/hidden page/storage failure. Clear queued motor commands and prioritize Stop. Never resume on reconnect. Explain stock firmware may retain throttle after browser loss.
+MSPv2 project-local command `0x30F0`, wire version 1: flags, signed raw counts, sequence, age in ms and FC timestamp in µs. No write commands. See firmware/PROTOCOL.md.
 
-Incremental IndexedDB storage with recoverable interrupted runs. Snapshot profile, calibration, selected motors, FC/build, notes, timestamps/reason, requested throttle, transmitted outputs, electrical values/power, optional RPM/ESC/HX711, timing/freshness/validity. Missing values remain empty. Live/history charts, overlays, CSV export and full JSON import/export. Label current/thrust aggregate when multiple motors run; efficiency only with valid thrust and power.
+Tare/calibrate/save require stopped motors. Capture at least eight distinct fresh nonsaturated samples over about one second; reject unstable or insufficiently separated readings without replacing the previous calibration. Calibration supports either sensor polarity. Save explicitly stores offset and counts/gram in this browser, keyed by FC UID, and verifies readback. Firmware flash contains GPIO assignments only.
 
-## Optional firmware
+## Git and validation
 
-`USE_BETABENCH`: sessions, combined samples, 500ms motor-command watchdog. `USE_HX711`: implies USE_BETABENCH. Neither default; retain Betaflight licensing. Local MSPv2 IDs 0x30F0–0x30F7: capabilities, begin, set motors, stop, sample, tare, calibrate, save calibration. Versioned payloads, shared constants, test vectors.
+Upstream base: `6fd72d387140746c4006805b7aae14505df36e25`. Config submodule: `0b73c1f29563e390b53c7f3ea631d26d6e969cde`. Fork: https://github.com/FractalEngineer/betaflight. Original detached checkout, modified configuration and untracked DroneCAN content must remain untouched.
 
-Begin disarmed with outputs stopped and arming inhibited; commands contain session ID, increasing sequence, all motor values. Fully validate before output changes. Only valid motor commands feed watchdog. Timeout stops and invalidates; explicit Begin required. Stop clears outputs/session. Prevent legacy motor writes bypassing active session. Samples include FC timestamps, outputs/electrical, optional motor data, and HX711 values/freshness.
-
-One HX711, channel A/gain128, hardware 10/80Hz. Nonblocking readiness polling with bounded protected clock timing. Configurable persistent HX711_SCK/HX711_DOUT resources, initially unassigned, conflict checking. Release UART4 TX/RX; PA0/TX4=SCK, PA1/RX4=DOUT; Save/Reboot. USB MSP. Document compatible voltage, common ground, wiring, and restoration.
-
-Tare/calibrate/save only with stopped motors. One-second fresh-sample averages. Tare updates RAM offset, no flash writes. Positive known grams derive signed counts/gram. Reject missing/stale/saturated/unstable/insufficient separation without replacing prior calibration. Explicit save persists offset/scale with readback. Signed milligrams and raw counts over MSP; display filtering separate. Browser logs required; no Blackbox format changes.
-
-## Validation and acceptance
-
-- Profiles: all boundaries/interpolation/stop semantics/editor round trips/validation.
-- Serial/control: fragmentation/corruption/unsupported commands/timeouts/late replies/motor count/Stop priority/disconnect/gaps/no resume.
-- Storage: incremental writes/interruption/CSV units/JSON round trips/missing data/calibration snapshots.
-- Firmware: watchdog despite telemetry/stale session/arming inhibition/HX711 decoding/timing/faults/calibration rejection/persistence.
-- Build CLRACINGF4 disabled, bench-only, HX711; verify flash/RAM and no target changes.
-- Physical: outputs/disconnect without propellers, then restrained thrust stand and known mass. Leave pending without hardware.
-- Deploy: Pages paths, Web Serial, profiles/history/charts/exports in Chrome/Edge.
-- PR: clean diff/commits/fork tracking/reproducible patch/validation record.
-
-Defaults: no accounts/backend; simultaneous shared curves; configurable durations; no onboard profiles or browser flashing.
+Record final feature SHA, build commands/results, patch tree comparison, CI and deployment verification in firmware/VALIDATION.md. Test firmware disabled/enabled, driver GPIO/timing/freshness faults, editor boundaries/interpolation/migration, serial errors/Stop priority, calibration and storage, and browser run/abort flows. Keep physical validation unchecked until actual testing.

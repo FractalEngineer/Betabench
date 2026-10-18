@@ -3,18 +3,20 @@ import type { Profile, Run, Sample } from "./types";
 import { validateProfile } from "./profiles";
 let connection: ReturnType<typeof openDB> | undefined;
 const db = () =>
-  (connection ??= openDB("betabench", 2, {
+  (connection ??= openDB("betabench", 3, {
     upgrade(db, oldVersion) {
       if (oldVersion < 1) {
         db.createObjectStore("profiles", { keyPath: "id" });
         db.createObjectStore("runs", { keyPath: "id" });
       }
-      db.createObjectStore("chunks", { keyPath: ["runId", "start"] });
+      if (oldVersion < 2)
+        db.createObjectStore("chunks", { keyPath: ["runId", "start"] });
+      db.createObjectStore("calibrations");
     },
   }));
 export const store = {
   async profiles(): Promise<Profile[]> {
-    return (await db()).getAll("profiles");
+    return (await (await db()).getAll("profiles")).map(validateProfile);
   },
   async saveProfile(p: Profile) {
     await (await db()).put("profiles", validateProfile(p));
@@ -23,6 +25,7 @@ export const store = {
     const d = await db();
     const runs: (Run & { sampleCount?: number })[] = await d.getAll("runs");
     for (const r of runs) {
+      r.profile = validateProfile(r.profile);
       if (r.state === "running") {
         r.state = "interrupted";
         r.reason = "Browser session ended before completion";
@@ -170,7 +173,7 @@ export function validateRun(value: unknown): Run {
     r.samples.length > 200000
   )
     throw Error("Invalid run file");
-  validateProfile(r.profile);
+  const profile = validateProfile(r.profile);
   for (const s of r.samples) {
     if (
       !s ||
@@ -194,5 +197,15 @@ export function validateRun(value: unknown): Run {
       if (s[key] !== undefined && !Number.isFinite(s[key]))
         throw Error("Invalid measurement value");
   }
-  return structuredClone(r);
+  return { ...structuredClone(r), profile };
+}
+
+export async function loadCalibration(uid: string) {
+  return (await db()).get("calibrations", uid);
+}
+export async function persistCalibration(
+  uid: string,
+  calibration: import("./types").Calibration,
+) {
+  await (await db()).put("calibrations", calibration, uid);
 }

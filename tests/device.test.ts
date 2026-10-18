@@ -1,3 +1,4 @@
+import "fake-indexeddb/auto";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { FlightController, SerialLink, Unsupported } from "../src/device";
 import { MSP, frame, packed } from "../src/protocol";
@@ -78,7 +79,8 @@ describe("stock capability discovery", () => {
       ...changes,
     };
     const request = vi.fn(async (command: number) => {
-      if (command === MSP.CAPS) throw new Unsupported("not implemented");
+      if (command === MSP.HX_SAMPLE && !(MSP.HX_SAMPLE in changes))
+        throw new Unsupported("not implemented");
       return responses[command] ?? new Uint8Array();
     });
     return {
@@ -92,7 +94,6 @@ describe("stock capability discovery", () => {
     expect(d.identity).toMatchObject({
       name: "CLRF",
       motorCount: 4,
-      enhanced: false,
       hx711: false,
     });
   });
@@ -116,5 +117,54 @@ describe("stock capability discovery", () => {
     expect(
       request.mock.calls.some(([command]) => command === MSP.SET_MOTOR),
     ).toBe(false);
+  });
+  it("uses raw-only HX711 reads for browser tare, signed calibration and UID persistence", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    let raw = 100,
+      sequence = 0;
+    const fixture = () =>
+      packed(18, (v) => {
+        v.setUint8(0, 1);
+        v.setUint8(1, 3);
+        v.setInt32(2, raw, true);
+        v.setUint32(6, ++sequence, true);
+      });
+    const { d, request } = controller({ [MSP.HX_SAMPLE]: fixture() });
+    await d.discover();
+    expect(d.identity.hx711).toBe(true);
+    request.mockImplementation(async (command: number) =>
+      command === MSP.HX_SAMPLE ? fixture() : new Uint8Array(10),
+    );
+    const tare = d.tare();
+    await vi.advanceTimersByTimeAsync(1200);
+    await tare;
+    expect(d.calibration.offset).toBe(100);
+    raw = -41900;
+    const calibrate = d.calibrate(100);
+    await vi.advanceTimersByTimeAsync(1200);
+    await calibrate;
+    expect(d.calibration.countsPerGram).toBe(-420);
+    await d.saveCalibration();
+    expect(d.calibration.saved).toBe(true);
+    const reconnected = controller({ [MSP.HX_SAMPLE]: fixture() }).d;
+    await reconnected.discover();
+    expect(reconnected.calibration).toEqual(d.calibration);
+    expect(
+      request.mock.calls
+        .filter(([c]) => c > 255)
+        .every(([c]) => c === MSP.HX_SAMPLE),
+    ).toBe(true);
+    const previous = { ...d.calibration };
+    raw = 0;
+    request.mockImplementation(async (command: number) => {
+      if (command === MSP.HX_SAMPLE) {
+        const b = fixture();
+        b[1] = 1;
+        return b;
+      }
+      return new Uint8Array(10);
+    });
+    await expect(d.tare()).rejects.toThrow("stale");
+    expect(d.calibration).toEqual(previous);
   });
 });

@@ -1,17 +1,15 @@
-export type Segment = {
+export type ProfilePoint = {
   id: string;
-  kind: "hold" | "linear" | "stop";
-  durationMs: number;
-  from: number;
-  to: number;
+  timeMs: number;
+  throttle: number;
   minimum?: boolean;
 };
 export type Profile = {
-  version: 1;
+  version: 2;
   id: string;
   name: string;
   description: string;
-  segments: Segment[];
+  points: ProfilePoint[];
 };
 export type Calibration = {
   offset: number;
@@ -25,7 +23,6 @@ export type Identity = {
   version: string;
   api: string;
   motorCount: number;
-  enhanced: boolean;
   hx711: boolean;
   simulated: boolean;
   voltageSource: number;
