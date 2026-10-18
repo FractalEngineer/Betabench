@@ -21,6 +21,10 @@ The measurements graph plots live telemetry as soon as a device is connected. St
 
 **CLI** opens a real Betaflight CLI session over the same USB connection, the way Configurator's CLI tab does, so you can read `diff`/`dump`, change settings, and save without leaving the browser. The FC pauses telemetry and motor control while the session is open, and arming stays disabled until it reboots.
 
+![BetaBench running a CLI session over MSP and printing the flight controller's resource map](docs/images/cli.png)
+
+_Simulator CLI session listing the FC resource map; no hardware connected._
+
 The app requires Betaflight MSP API 1.42+ and conventional DShot150/300/600. Reversible/3D and inverted motor outputs are rejected. It reads the configured FC voltage/current sources; accurate electrical measurements require the FC sensors to be connected and calibrated. Shared current and thrust represent the selected motors together, including board consumption. Optional RPM and ESC temperature depend on configured telemetry support.
 
 **Betaflight retains its last motor-test throttle after a browser crash or lost USB connection.** Keep a physical power cutoff available. Browser scheduling targets 50 Hz and is not a real-time control guarantee; measured rate and maximum telemetry gap appear in the UI. Hidden pages, command delays, stale telemetry, serial failures, and storage failures abort a run. Reconnection never resumes it.
