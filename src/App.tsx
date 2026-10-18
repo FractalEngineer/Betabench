@@ -326,7 +326,13 @@ export default function App() {
     <div className="app-shell" data-theme={theme}>
       <aside className="sidebar">
         <a className="brand" href={import.meta.env.BASE_URL}>
-          <Activity size={24} /> Betabench
+          <img
+            className="brand-wordmark"
+            src={`${import.meta.env.BASE_URL}brand/betabench-wordmark${theme === "light" ? "-light" : ""}.svg`}
+            alt="BetaBench"
+            width="156"
+            height="34"
+          />
         </a>
         <nav>
           {(

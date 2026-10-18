@@ -134,14 +134,18 @@ svg {
   gap: 28px;
 }
 .brand {
-  font-size: 21px;
-  font-weight: 700;
   display: flex;
   align-items: center;
-  gap: 8px;
-  color: var(--accent);
-  padding: 0 8px;
+  min-height: 34px;
+  padding: 0 4px;
 }
+.brand-wordmark {
+  display: block;
+  width: 100%;
+  max-width: 156px;
+  height: auto;
+}
+
 nav {
   display: grid;
   gap: 6px;

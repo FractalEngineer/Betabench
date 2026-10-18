@@ -18,6 +18,7 @@ Betaflight changes are limited to an opt-in `USE_HX711` raw sensor driver, persi
 - [x] Implement raw HX711 acquisition and versioned read-only MSP.
 - [x] Move tare, calibration and UID-keyed persistence to IndexedDB in the web app.
 - [x] Match Configurator's yellow and neutral-gray theme; remove promotional headings and subtitles.
+- [x] Integrate the approved full BetaBench wordmark in the app and README; add an actual simulator screenshot while retaining the existing palette.
 - [x] Replace segment editing with freely draggable time/throttle points and sticky right angles.
 - [x] Preserve ramps, holds, steps, stopped/minimum-running distinction and legacy profile imports.
 - [x] Place import beside profile download.

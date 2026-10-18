@@ -1,8 +1,15 @@
-# Betabench
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="public/brand/betabench-wordmark.svg">
+  <img src="public/brand/betabench-wordmark-light.svg" alt="BetaBench" width="360">
+</picture>
 
 A browser-based motor and ESC test bench using a Betaflight flight controller.
 
 **[Open Betabench](https://fractalengineer.github.io/Betabench/)** · [Implementation checklist](PLAN.md) · [Firmware and wiring](firmware/README.md) · [MSP extension](firmware/PROTOCOL.md)
+
+![BetaBench test bench with an editable sweep and simulated current, voltage, power and thrust measurements](docs/images/test-bench.png)
+
+_Simulator run; no hardware connected._
 
 ## Use
 
