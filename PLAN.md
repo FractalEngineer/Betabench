@@ -31,7 +31,8 @@ Betaflight changes are limited to an opt-in `USE_HX711` raw sensor driver, persi
 - [x] Compile current-upstream CLRACINGF4 with HX711 disabled and enabled; record memory usage.
 - [x] Review and squash firmware into an HX711-only feature commit; push to the fork's `HX711` branch.
 - [x] Export and verify a reproducible firmware patch against the recorded upstream base.
-- [ ] Push the web app to `main`, deploy Pages and verify the public deployment.
+- [x] Push the web app to `main`, deploy Pages and verify the public deployment.
+  - CI and deployment passed; all eight browser tests passed against the public HTTPS site. Desktop Edge exposes Web Serial in the secure page.
 - [ ] Complete physical FC/ESC/HX711 validation.
   - No physical hardware has been exercised. USB/MSP behavior, sensor timing/noise, known-load accuracy and restrained motor operation remain pending.
 

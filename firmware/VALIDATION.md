@@ -50,7 +50,9 @@ HEX artifacts are attached to the CI run. Host tests execute the production driv
 - Eight desktop Edge browser tests passed: simulator run/edit/save/history/overlay/exports, both-axis point dragging, metric toggles, unit conversion/persistence, target/pad/custom resource generation, identical-pin rejection, light theme, tare/calibrate/save, countdown stop, hidden-page abort, delayed-command abort, storage failure and mobile overflow.
 - Desktop dark/light and 390 px mobile layouts visually inspected, including the four simultaneous measurement curves and generic resource controls.
 - Production TypeScript/Vite build passed. Charting and the separately loaded target snapshot emit a non-fatal chunk-size advisory.
-- GitHub Pages deployment verification is pending the main push in this implementation turn; the public URL is https://fractalengineer.github.io/Betabench/.
+- [Web CI/deployment run 39127326198](https://github.com/FractalEngineer/Betabench/actions/runs/39127326198) passed for application commit `b16abd45730aa7e5ef7372417ebe91622d26b257`, pushed directly to `main`.
+- Public deployment https://fractalengineer.github.io/Betabench/ returned HTTP 200 with the expected app title. All eight Edge browser tests also passed against that public deployment. The HTTPS page exposes `navigator.serial` and is a secure context; no physical port was opened.
+- The following documentation-only commit records deployment completion; application source is unchanged.
 
 ## Pending physical validation
 
