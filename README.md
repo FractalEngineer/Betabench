@@ -15,7 +15,7 @@ _MiniQuadTestBench simulator run; no hardware connected._
 
 Open the app in desktop Chrome or Edge. Select **Try simulator** to explore without hardware, or **Connect FC** to choose the USB serial port. Close Betaflight Configurator first so the port is available.
 
-Choose MiniQuadTestBench or the 0→100→0 sweep, select motor outputs, and edit the timeline or point table. Save a copy to retain custom profiles. Secure the stand, enable the outputs for this run, and press **Run profile**. A three-second countdown precedes playback. Stop is always available while connected.
+Choose MiniQuadTestBench or the 0→100→0 sweep from the profile dropdown. Rename it in that same field, edit the timeline or point table, and select motor outputs. Save a copy to retain custom profiles. Secure the stand, enable the outputs for this run, and press **Run profile**. A three-second countdown precedes playback. Stop is always available while connected.
 
 The app requires Betaflight MSP API 1.42+ and conventional DShot150/300/600. Reversible/3D and inverted motor outputs are rejected. It reads the configured FC voltage/current sources; accurate electrical measurements require the FC sensors to be connected and calibrated. Shared current and thrust represent the selected motors together, including board consumption. Optional RPM and ESC temperature depend on configured telemetry support.
 
@@ -33,11 +33,11 @@ The app requires Betaflight MSP API 1.42+ and conventional DShot150/300/600. Rev
 
 ![BetaBench load-cell page showing calibration controls, target and pad selection, and generated resource CLI](docs/images/load-cell.png)
 
-_Simulator load-cell setup; no hardware connected._
+_Simulator load-cell setup with a manually selected target; no hardware connected._
 
 Build the optional firmware with `USE_HX711`, connect an HX711 to free GPIO resources, then use **Load cell** to tare the empty stand, enter a known mass in grams, calibrate, and save in this browser for this FC UID. Capture needs stopped motors and stable samples. GPIO assignments alone are stored on the FC. Calibration and logs can be exported with run JSON.
 
-Select a target and repurposed pads to generate resource CLI commands; Custom supports current resource dumps. CLRACINGF4 defaults to TX4/PA0 for clock, RX4/PA1 for data, and USB for MSP. Pins are assigned through normal Betaflight CLI resources with Save/Reboot, without changing the board target. See the [firmware guide](firmware/README.md) for signal voltage, complete commands, restoration, and build instructions.
+Search for and explicitly select a target, then choose repurposed pads to generate resource CLI commands; no target is preselected. Custom supports current resource dumps. CLRACINGF4 can use TX4/PA0 for clock and RX4/PA1 for data, with USB for MSP. Pins are assigned through normal Betaflight CLI resources with Save/Reboot, without changing the board target. See the [firmware guide](firmware/README.md) for signal voltage, complete commands, restoration, and build instructions.
 
 ## Development
 

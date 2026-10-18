@@ -11,11 +11,16 @@ test("simulator, profile editing, run, history, calibration and exports", async 
     page.getByText("Virtual CLRACINGF4", { exact: true }),
   ).toBeVisible();
   await page
-    .getByLabel("Choose preset or saved profile")
-    .selectOption("triangle");
+    .getByRole("combobox", { name: "Throttle profile", exact: true })
+    .click();
+  await page
+    .getByRole("option", { name: "0 → 100 → 0 sweep", exact: true })
+    .click();
   await page.getByLabel("Point 2 time").fill("0.5");
   await page.getByLabel("Point 3 time").fill("1");
-  await page.getByLabel("Profile name").fill("Smoke sweep");
+  await page
+    .getByRole("combobox", { name: "Throttle profile", exact: true })
+    .fill("Smoke sweep");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await page.getByLabel("Bench is secured and ready.").check();
   await page.getByRole("button", { name: /Run profile/ }).click();

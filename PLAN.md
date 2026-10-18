@@ -20,6 +20,8 @@ Betaflight changes are limited to an opt-in `USE_HX711` raw sensor driver, persi
 - [x] Match Configurator's yellow and neutral-gray theme; remove promotional headings and subtitles.
 - [x] Integrate the approved full BetaBench wordmark in the app and README; retain the existing palette.
 - [x] Add fresh MQTB and load-cell page screenshots to the README; replace the theme text with an accessible sun/moon icon.
+- [x] Combine profile naming and selection in one editable dropdown.
+- [x] Make target selection searchable, start it empty, and require an explicit selection before generating resource CLI.
 - [x] Replace segment editing with freely draggable time/throttle points and sticky right angles.
 - [x] Preserve ramps, holds, steps, stopped/minimum-running distinction and legacy profile imports.
 - [x] Place import beside profile download.

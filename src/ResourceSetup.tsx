@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { ComboBox } from "./ComboBox";
 import data from "./targets.json";
 export type Pad = {
   label: string;
@@ -26,18 +27,20 @@ export function resourceCli(pads: Pad[], sck: Pad, dout: Pad) {
     "save",
   ].join("\n");
 }
+
 export function ResourceSetup() {
-  const initial =
-    data.targets.find((t) => t.name === "CLRACINGF4") ?? data.targets[0];
-  const [name, setName] = useState(initial.name);
-  const [sckKey, setSck] = useState("TX4");
-  const [doutKey, setDout] = useState("RX4");
-  const [customSck, setCustomSck] = useState("A00");
-  const [customDout, setCustomDout] = useState("A01");
-  const [customResources, setCustomResources] = useState(
-    "resource SERIAL_TX 4 A00\nresource SERIAL_RX 4 A01",
-  );
+  const [name, setName] = useState("");
+  const [query, setQuery] = useState("");
+  const [sckKey, setSck] = useState("");
+  const [doutKey, setDout] = useState("");
+  const [customSck, setCustomSck] = useState("");
+  const [customDout, setCustomDout] = useState("");
+  const [customResources, setCustomResources] = useState("");
   const [copied, setCopied] = useState(false);
+  useEffect(
+    () => setCopied(false),
+    [name, sckKey, doutKey, customSck, customDout, customResources],
+  );
   const target = data.targets.find((t) => t.name === name);
   const pads: Pad[] =
     target?.pads ??
@@ -61,153 +64,174 @@ export function ResourceSetup() {
     ? (pads.find((p) => p.label === doutKey) ??
       pads.find((p) => p.pin !== sck.pin)!)
     : { label: "DOUT", resource: "", index: 1, pin: customDout.toUpperCase() };
-  let cli = "";
-  let error = "";
-  try {
-    if (
-      !sck ||
-      !dout ||
-      !/^([A-Z]\d{2})$/.test(sck.pin) ||
-      !/^([A-Z]\d{2})$/.test(dout.pin)
-    )
-      throw Error("Enter GPIO pins such as A00 and A01");
-    cli = resourceCli(pads, sck, dout);
-  } catch (e) {
-    error = String(e);
+  function selectTarget(value: string) {
+    setName(value);
+    setQuery(value === "custom" ? "Custom / current resource dump" : value);
+    const t = data.targets.find((t) => t.name === value);
+    const clock = t?.pads.find((p) => p.resource === "SERIAL_TX") ?? t?.pads[0];
+    const input =
+      t?.pads.find(
+        (p) =>
+          p.resource === "SERIAL_RX" &&
+          p.index === clock?.index &&
+          p.pin !== clock?.pin,
+      ) ?? t?.pads.find((p) => p.pin !== clock?.pin);
+    setSck(clock?.label ?? "");
+    setDout(input?.label ?? "");
   }
+  let cli = "",
+    error = "";
+  if (name)
+    try {
+      if (
+        !sck ||
+        !dout ||
+        !/^([A-Z]\d{2})$/.test(sck.pin) ||
+        !/^([A-Z]\d{2})$/.test(dout.pin)
+      )
+        throw Error("Enter GPIO pins such as A00 and A01");
+      cli = resourceCli(pads, sck, dout);
+    } catch (e) {
+      error = String(e);
+    }
   return (
     <section className="panel wiring">
       <div className="section-heading">
         <h2>HX711 resources</h2>
       </div>
-      <label className="field-label">
-        Target
-        <select
-          aria-label="Flight controller target"
-          value={name}
-          onChange={(e) => {
-            setName(e.target.value);
-            const t = data.targets.find((t) => t.name === e.target.value);
-            const clock =
-              t?.pads.find((p) => p.resource === "SERIAL_TX") ?? t?.pads[0];
-            const input =
-              t?.pads.find(
-                (p) => p.resource === "SERIAL_RX" && p.pin !== clock?.pin,
-              ) ?? t?.pads.find((p) => p.pin !== clock?.pin);
-            setSck(clock?.label ?? "");
-            setDout(input?.label ?? "");
-            setCopied(false);
+      <div className="field-label">
+        <span>Target</span>
+        <ComboBox
+          label="Flight controller target"
+          value={query}
+          selectedId={name}
+          options={[
+            ...data.targets.map((t) => ({ id: t.name, label: t.name })),
+            { id: "custom", label: "Custom / current resource dump" },
+          ]}
+          placeholder="Search targets…"
+          onChange={(value) => {
+            setQuery(value);
+            setName("");
+            setSck("");
+            setDout("");
           }}
-        >
-          {data.targets.map((t) => (
-            <option key={t.name} value={t.name}>
-              {t.name}
-            </option>
-          ))}
-          <option value="custom">Custom / current resource dump</option>
-        </select>
-      </label>
-      {target ? (
-        <div className="pad-selects">
-          {[
-            ["HX711 clock (SCK)", sck.label, setSck],
-            ["HX711 data (DOUT)", dout.label, setDout],
-          ].map(([label, value, setter]) => (
-            <label key={String(label)}>
-              {String(label)}
-              <select
-                aria-label={String(label)}
-                value={String(value)}
-                onChange={(e) =>
-                  (setter as (s: string) => void)(e.target.value)
+          onSelect={selectTarget}
+        />
+      </div>
+      {!name ? (
+        <p className="subtle">
+          Choose a target or select Custom to use your current resource
+          assignments.
+        </p>
+      ) : (
+        <>
+          {target ? (
+            <div className="pad-selects">
+              {[
+                ["HX711 clock (SCK)", sck.label, setSck],
+                ["HX711 data (DOUT)", dout.label, setDout],
+              ].map(([label, value, setter]) => (
+                <label key={String(label)}>
+                  {String(label)}
+                  <select
+                    aria-label={String(label)}
+                    value={String(value)}
+                    onChange={(e) =>
+                      (setter as (s: string) => void)(e.target.value)
+                    }
+                  >
+                    {pads.map((p) => (
+                      <option key={p.label} value={p.label}>
+                        {p.label} / {p.pin}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+            </div>
+          ) : (
+            <>
+              <label>
+                Current CLI resources
+                <textarea
+                  aria-label="Current resource assignments"
+                  placeholder="Paste the output of resource"
+                  value={customResources}
+                  onChange={(e) => setCustomResources(e.target.value)}
+                />
+              </label>
+              <div className="pad-selects">
+                <label>
+                  Clock GPIO
+                  <input
+                    aria-label="Clock GPIO"
+                    placeholder="A00"
+                    value={customSck}
+                    onChange={(e) => setCustomSck(e.target.value)}
+                  />
+                </label>
+                <label>
+                  Data GPIO
+                  <input
+                    aria-label="Data GPIO"
+                    placeholder="A01"
+                    value={customDout}
+                    onChange={(e) => setCustomDout(e.target.value)}
+                  />
+                </label>
+              </div>
+            </>
+          )}
+          <p className="subtle">
+            Build with USE_HX711. Selected resources and their UART functions
+            are disabled. Verify the mapping against the flashed target and
+            board revision.
+          </p>
+          <table>
+            <thead>
+              <tr>
+                <th>FC pad</th>
+                <th>HX711</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  {sck.label} / {sck.pin || "—"}
+                </td>
+                <td>PD_SCK</td>
+              </tr>
+              <tr>
+                <td>
+                  {dout.label} / {dout.pin || "—"}
+                </td>
+                <td>DOUT</td>
+              </tr>
+            </tbody>
+          </table>
+          {error ? (
+            <p role="alert">{error}</p>
+          ) : (
+            <>
+              <pre data-testid="resource-cli">{cli}</pre>
+              <button
+                onClick={() =>
+                  void navigator.clipboard
+                    .writeText(cli)
+                    .then(() => setCopied(true))
                 }
               >
-                {pads.map((p) => (
-                  <option key={p.label} value={p.label}>
-                    {p.label} / {p.pin}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ))}
-        </div>
-      ) : (
-        <>
-          <label>
-            Current CLI resources
-            <textarea
-              aria-label="Current resource assignments"
-              value={customResources}
-              onChange={(e) => setCustomResources(e.target.value)}
-            />
-          </label>
-          <div className="pad-selects">
-            <label>
-              Clock GPIO
-              <input
-                aria-label="Clock GPIO"
-                value={customSck}
-                onChange={(e) => setCustomSck(e.target.value)}
-              />
-            </label>
-            <label>
-              Data GPIO
-              <input
-                aria-label="Data GPIO"
-                value={customDout}
-                onChange={(e) => setCustomDout(e.target.value)}
-              />
-            </label>
-          </div>
+                {copied ? "Copied" : "Copy CLI"}
+              </button>
+            </>
+          )}
+          <p className="subtle">
+            Save reboots the FC. Target mappings: {data.revision.slice(0, 8)}.
+            Use Custom to match an existing resource remap.
+          </p>
         </>
       )}
-      <p className="subtle">
-        Build with USE_HX711. Selected resources and their UART functions are
-        disabled. Verify the mapping against the flashed target and board
-        revision.
-      </p>
-      <table>
-        <thead>
-          <tr>
-            <th>FC pad</th>
-            <th>HX711</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>
-              {sck.label} / {sck.pin}
-            </td>
-            <td>PD_SCK</td>
-          </tr>
-          <tr>
-            <td>
-              {dout.label} / {dout.pin}
-            </td>
-            <td>DOUT</td>
-          </tr>
-        </tbody>
-      </table>
-      {error ? (
-        <p role="alert">{error}</p>
-      ) : (
-        <>
-          <pre data-testid="resource-cli">{cli}</pre>
-          <button
-            onClick={() =>
-              void navigator.clipboard
-                .writeText(cli)
-                .then(() => setCopied(true))
-            }
-          >
-            {copied ? "Copied" : "Copy CLI"}
-          </button>
-        </>
-      )}
-      <p className="subtle">
-        Save reboots the FC. Target mappings: {data.revision.slice(0, 8)}. Use
-        Custom to match an existing resource remap.
-      </p>
     </section>
   );
 }

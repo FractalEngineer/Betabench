@@ -4,8 +4,11 @@ test("point editor moves both axes and retains corners through JSON export", asy
 }) => {
   await page.goto("");
   await page
-    .getByLabel("Choose preset or saved profile")
-    .selectOption("triangle");
+    .getByRole("combobox", { name: "Throttle profile", exact: true })
+    .click();
+  await page
+    .getByRole("option", { name: "0 → 100 → 0 sweep", exact: true })
+    .click();
   const handle = page.getByRole("button", {
     name: "Curve point 2",
     exact: true,
@@ -32,7 +35,7 @@ test("point editor moves both axes and retains corners through JSON export", asy
     .getByRole("button", { name: "Export profile", exact: true })
     .click();
   expect((await download).suggestedFilename()).toMatch(/\.json$/);
-  const buttons = page.locator(".profile-toolbar button");
+  const buttons = page.locator(".profile-toolbar > button");
   await expect(buttons.nth(2)).toHaveAttribute("aria-label", "Export profile");
   await expect(buttons.nth(3)).toHaveAttribute(
     "aria-label",
@@ -54,6 +57,20 @@ test("metric toggles, units, target/pad selection and custom CLI", async ({
   await expect(page.getByLabel("Known calibration load")).toHaveValue(
     "0.980665",
   );
+  const target = page.getByRole("combobox", {
+    name: "Flight controller target",
+    exact: true,
+  });
+  await expect(target).toHaveValue("");
+  await expect(page.getByTestId("resource-cli")).toHaveCount(0);
+  await target.fill("CLRACINGF4");
+  await page.getByRole("option", { name: "CLRACINGF4", exact: true }).click();
+  await page
+    .getByLabel("HX711 clock (SCK)", { exact: true })
+    .selectOption("TX4");
+  await page
+    .getByLabel("HX711 data (DOUT)", { exact: true })
+    .selectOption("RX4");
   await expect(page.getByTestId("resource-cli")).toContainText(
     "resource HX711_SCK 1 A00",
   );
@@ -63,7 +80,13 @@ test("metric toggles, units, target/pad selection and custom CLI", async ({
   await expect(page.getByTestId("resource-cli")).toContainText(
     "resource LED_STRIP 1 NONE",
   );
-  await page.getByLabel("Flight controller target").selectOption("custom");
+  await target.fill("custom");
+  await page
+    .getByRole("option", {
+      name: "Custom / current resource dump",
+      exact: true,
+    })
+    .click();
   await page
     .getByLabel("Current resource assignments")
     .fill(

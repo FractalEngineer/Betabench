@@ -33,6 +33,7 @@ import { FlightController, SerialLink, Simulator } from "./device";
 import { RunController } from "./runner";
 import { store, download, csv, validateRun } from "./storage";
 import { ProfileEditor } from "./ProfileEditor";
+import { ComboBox } from "./ComboBox";
 
 const ResourceSetup = lazy(() =>
   import("./ResourceSetup").then((m) => ({ default: m.ResourceSetup })),
@@ -253,6 +254,8 @@ export default function App() {
       const p = presets.some((s) => s.id === profile.id)
         ? duplicate(profile)
         : profile;
+      const preset = presets.find((s) => s.id === profile.id);
+      if (preset && profile.name !== preset.name) p.name = profile.name;
       await store.saveProfile(p);
       setProfile(p);
       setProfiles([...presets, ...(await store.profiles())]);
@@ -463,31 +466,23 @@ export default function App() {
                     <span>{(duration(profile) / 1000).toFixed(2)} s</span>
                   </div>
                   <div className="profile-toolbar">
-                    <select
-                      aria-label="Choose preset or saved profile"
+                    <ComboBox
+                      label="Throttle profile"
+                      value={profile.name}
+                      selectedId={profile.id}
+                      options={profiles.map((p) => ({
+                        id: p.id,
+                        label: p.name,
+                      }))}
+                      editable
                       disabled={running}
-                      value={
-                        profiles.some((p) => p.id === profile.id)
-                          ? profile.id
-                          : ""
-                      }
-                      onChange={(e) =>
+                      onChange={(name) => setProfile({ ...profile, name })}
+                      onSelect={(id) =>
                         setProfile(
-                          structuredClone(
-                            profiles.find((p) => p.id === e.target.value)!,
-                          ),
+                          structuredClone(profiles.find((p) => p.id === id)!),
                         )
                       }
-                    >
-                      {!profiles.some((p) => p.id === profile.id) && (
-                        <option value="">Unsaved</option>
-                      )}
-                      {profiles.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
-                        </option>
-                      ))}
-                    </select>
+                    />
                     <button
                       className="icon"
                       aria-label="Duplicate profile"
@@ -523,16 +518,6 @@ export default function App() {
                       <ArrowUpFromLine size={16} />
                     </button>
                   </div>
-                  <input
-                    className="profile-name"
-                    aria-label="Profile name"
-                    disabled={running}
-                    maxLength={120}
-                    value={profile.name}
-                    onChange={(e) =>
-                      setProfile({ ...profile, name: e.target.value })
-                    }
-                  />
                   <ProfileEditor
                     profile={profile}
                     onChange={setProfile}
