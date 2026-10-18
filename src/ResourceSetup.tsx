@@ -7,20 +7,40 @@ export type Pad = {
   index: number;
   pin: string;
 };
-export function resourceCli(pads: Pad[], sck: Pad, dout: Pad) {
+export function uartAssignments(text: string) {
+  const assignments = new Map<string, string>();
+  for (const line of text.split("\n")) {
+    const match = line
+      .trim()
+      .match(
+        /^(?:set\s+)?([a-z][a-z0-9_]*_uart)\s*=\s*(NONE|VCP|UART\d+|LPUART\d+|PIOUART\d+|SOFT\d+)\s*$/i,
+      );
+    if (match) assignments.set(match[1].toLowerCase(), match[2].toUpperCase());
+  }
+  return assignments;
+}
+
+function affectedPads(pads: Pad[], sck: Pad, dout: Pad) {
+  return pads.filter((p) => p.pin === sck.pin || p.pin === dout.pin);
+}
+
+export function resourceCli(pads: Pad[], sck: Pad, dout: Pad, settings = "") {
   if (sck.pin === dout.pin) throw Error("Choose different GPIO pads");
-  const affected = pads.filter((p) => p.pin === sck.pin || p.pin === dout.pin);
-  const uarts = [
-    ...new Set(
-      affected
-        .filter((p) => p.resource.startsWith("SERIAL_"))
-        .map((p) => p.index),
-    ),
-  ];
+  const affected = affectedPads(pads, sck, dout);
+  const uarts = new Set(
+    affected
+      .filter((p) => p.resource === "SERIAL_TX" || p.resource === "SERIAL_RX")
+      .map((p) => `UART${p.index}`),
+  );
+  const assignments = uartAssignments(settings);
+  if (uarts.size && !assignments.size)
+    throw Error(
+      "Paste the complete output of get _uart to identify functions using these UART pads",
+    );
   return [
-    ...uarts
-      .sort((a, b) => a - b)
-      .map((n) => `serial ${n - 1} 0 115200 57600 0 115200`),
+    ...[...assignments]
+      .filter(([, port]) => uarts.has(port))
+      .map(([setting]) => `set ${setting} = NONE`),
     ...new Set(affected.map((p) => `resource ${p.resource} ${p.index} NONE`)),
     `resource HX711_SCK 1 ${sck.pin}`,
     `resource HX711_DOUT 1 ${dout.pin}`,
@@ -36,10 +56,19 @@ export function ResourceSetup() {
   const [customSck, setCustomSck] = useState("");
   const [customDout, setCustomDout] = useState("");
   const [customResources, setCustomResources] = useState("");
+  const [uartSettings, setUartSettings] = useState("");
   const [copied, setCopied] = useState(false);
   useEffect(
     () => setCopied(false),
-    [name, sckKey, doutKey, customSck, customDout, customResources],
+    [
+      name,
+      sckKey,
+      doutKey,
+      customSck,
+      customDout,
+      customResources,
+      uartSettings,
+    ],
   );
   const target = data.targets.find((t) => t.name === name);
   const pads: Pad[] =
@@ -65,6 +94,7 @@ export function ResourceSetup() {
       pads.find((p) => p.pin !== sck.pin)!)
     : { label: "DOUT", resource: "", index: 1, pin: customDout.toUpperCase() };
   function selectTarget(value: string) {
+    setUartSettings("");
     setName(value);
     setQuery(value === "custom" ? "Custom / current resource dump" : value);
     const t = data.targets.find((t) => t.name === value);
@@ -81,6 +111,12 @@ export function ResourceSetup() {
   }
   let cli = "",
     error = "";
+  const needsUartSettings =
+    sck &&
+    dout &&
+    affectedPads(pads, sck, dout).some(
+      (p) => p.resource === "SERIAL_TX" || p.resource === "SERIAL_RX",
+    );
   if (name)
     try {
       if (
@@ -90,9 +126,14 @@ export function ResourceSetup() {
         !/^([A-Z]\d{2})$/.test(dout.pin)
       )
         throw Error("Enter GPIO pins such as A00 and A01");
-      cli = resourceCli(pads, sck, dout);
+      cli = resourceCli(
+        pads,
+        sck,
+        dout,
+        `${target ? "" : customResources}\n${uartSettings}`,
+      );
     } catch (e) {
-      error = String(e);
+      error = e instanceof Error ? e.message : String(e);
     }
   return (
     <section className="panel wiring">
@@ -115,6 +156,7 @@ export function ResourceSetup() {
             setName("");
             setSck("");
             setDout("");
+            setUartSettings("");
           }}
           onSelect={selectTarget}
         />
@@ -183,10 +225,26 @@ export function ResourceSetup() {
               </div>
             </>
           )}
+          {needsUartSettings && (
+            <label>
+              Current UART assignments
+              <textarea
+                aria-label="Current UART assignments"
+                placeholder="Paste the complete output of get _uart"
+                value={uartSettings}
+                onChange={(e) => setUartSettings(e.target.value)}
+              />
+              <span className="subtle">
+                Run <code>get _uart</code> in the FC CLI. A full{" "}
+                <code>dump</code> is also accepted. Only features assigned to
+                the selected UARTs will be unset.
+              </span>
+            </label>
+          )}
           <p className="subtle">
-            Build with USE_HX711. Selected resources and their UART functions
-            are disabled. Verify the mapping against the flashed target and
-            board revision.
+            Build with USE_HX711. Selected resource aliases and assigned UART
+            functions are released. Verify the mapping against the flashed
+            target and board revision.
           </p>
           <table>
             <thead>

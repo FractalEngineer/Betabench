@@ -30,12 +30,12 @@ git am /path/to/Betabench/firmware/hx711.patch
 
 ## GPIO setup
 
-Use the web app's **Load cell → HX711 resources** target/pad selectors to generate CLI commands, or paste current resource assignments under Custom when the FC has been remapped. Snapshot target mappings are from the config revision above; verify the board revision and flashed target. Disable the functions currently using the selected pads and release all resource aliases. Commands are generated for manual review and execution in Configurator.
+Use the web app's **Load cell → HX711 resources** target/pad selectors to generate CLI commands, or paste current resource assignments under Custom when the FC has been remapped. Snapshot target mappings are from the config revision above; verify the board revision and flashed target. For UART pads, paste the complete output of `get _uart` from the FC (a full `dump` also works). The helper unsets only `<feature>_uart` assignments matching the selected UARTs, preserving USB MSP, other ports, protocol selections and baud rates. Do not use a partial `diff` as the assignment snapshot. Release all resource aliases. Commands are generated for manual review and execution in Configurator.
 
-CLRACINGF4 example: USB carries MSP; TX4/PA0 is PD_SCK and RX4/PA1 is DOUT. These resources replace UART4:
+CLRACINGF4 example: USB carries MSP; TX4/PA0 is PD_SCK and RX4/PA1 is DOUT. These resources replace UART4. In this example, `get _uart` reports `gps_uart = UART4`; clear every feature actually assigned to UART4, or omit the `set` line if none are assigned:
 
 ```text
-serial 3 0 115200 57600 0 115200
+set gps_uart = NONE
 resource SERIAL_TX 4 NONE
 resource SERIAL_RX 4 NONE
 resource HX711_SCK 1 A00
@@ -57,7 +57,7 @@ resource SERIAL_RX 4 A01
 save
 ```
 
-Then restore UART4's original serial function and baud settings.
+Then restore UART4's original `<feature>_uart` assignments from the backup (for this example, `set gps_uart = UART4`), and save. The helper does not modify protocol or baud settings.
 
 ## Calibration and logging
 

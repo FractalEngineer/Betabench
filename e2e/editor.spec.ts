@@ -71,6 +71,17 @@ test("metric toggles, units, target/pad selection and custom CLI", async ({
   await page
     .getByLabel("HX711 data (DOUT)", { exact: true })
     .selectOption("RX4");
+  await expect(page.getByTestId("resource-cli")).toHaveCount(0);
+  await page
+    .getByLabel("Current UART assignments", { exact: true })
+    .fill("msp_1_uart = VCP\ngps_uart = UART4\nrx_uart = UART1");
+  await expect(page.getByTestId("resource-cli")).toContainText(
+    "set gps_uart = NONE",
+  );
+  await expect(page.getByTestId("resource-cli")).not.toContainText(
+    "msp_1_uart",
+  );
+  await expect(page.getByTestId("resource-cli")).not.toContainText("serial ");
   await expect(page.getByTestId("resource-cli")).toContainText(
     "resource HX711_SCK 1 A00",
   );
@@ -90,11 +101,13 @@ test("metric toggles, units, target/pad selection and custom CLI", async ({
   await page
     .getByLabel("Current resource assignments")
     .fill(
-      "resource MOTOR 3 B08\nresource LED_STRIP 1 B08\nresource SERIAL_RX 2 A03",
+      "resource MOTOR 3 B08\nresource LED_STRIP 1 B08\nresource SERIAL_RX 2 A03\nset rx_uart = UART2\nset msp_1_uart = VCP",
     );
   await page.getByLabel("Clock GPIO").fill("B08");
   await page.getByLabel("Data GPIO").fill("A03");
-  await expect(page.getByTestId("resource-cli")).toContainText("serial 1 0");
+  await expect(page.getByTestId("resource-cli")).toContainText(
+    "set rx_uart = NONE",
+  );
   await expect(page.getByTestId("resource-cli")).toContainText(
     "resource HX711_SCK 1 B08",
   );

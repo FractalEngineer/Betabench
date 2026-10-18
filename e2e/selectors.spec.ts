@@ -62,6 +62,10 @@ test("target search starts empty, requires selection, supports keyboard and clea
   await target.press("ArrowDown");
   await target.press("Enter");
   await expect(target).toHaveValue("CLRACINGF4");
+  await expect(page.getByTestId("resource-cli")).toHaveCount(0);
+  await page
+    .getByLabel("Current UART assignments", { exact: true })
+    .fill("msp_1_uart = VCP\nrx_uart = UART1");
   await expect(page.getByTestId("resource-cli")).toContainText(
     "resource HX711_SCK",
   );

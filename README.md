@@ -37,7 +37,7 @@ _Simulator load-cell setup with a manually selected target; no hardware connecte
 
 Build the optional firmware with `USE_HX711`, connect an HX711 to free GPIO resources, then use **Load cell** to tare the empty stand, enter a known mass in grams, calibrate, and save in this browser for this FC UID. Capture needs stopped motors and stable samples. GPIO assignments alone are stored on the FC. Calibration and logs can be exported with run JSON.
 
-Search for and explicitly select a target, then choose repurposed pads to generate resource CLI commands; no target is preselected. Custom supports current resource dumps. CLRACINGF4 can use TX4/PA0 for clock and RX4/PA1 for data, with USB for MSP. Pins are assigned through normal Betaflight CLI resources with Save/Reboot, without changing the board target. See the [firmware guide](firmware/README.md) for signal voltage, complete commands, restoration, and build instructions.
+Search for and explicitly select a target, then choose repurposed pads to generate resource CLI commands; no target is preselected. For UART pads, paste the complete `get _uart` output so the helper can unset only features on the selected ports using modern `<feature>_uart` settings. USB MSP and unrelated ports are preserved. Custom supports current resource dumps. CLRACINGF4 can use TX4/PA0 for clock and RX4/PA1 for data, with USB for MSP. Pins are assigned through normal Betaflight CLI resources with Save/Reboot, without changing the board target. See the [firmware guide](firmware/README.md) for signal voltage, complete commands, restoration, and build instructions.
 
 ## Development
 
