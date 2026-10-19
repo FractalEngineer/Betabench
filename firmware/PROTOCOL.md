@@ -24,7 +24,7 @@ Example response payload:
 Version 1, configured+fresh, raw -42010, sequence 99, age 10 ms, FC timestamp 12345 µs. With browser offset -10 and counts/gram -420, this is +100 g. Request frame (including MSPv2 CRC):
 
 ```text
-24 58 3c 00 f0 30 00 00 90
+24 58 3c 00 13 30 00 00 4a
 ```
 
 The web app keeps fixed grams in logged measurements and calculates `(raw - offset) / countsPerGram` only for fresh, configured, nonsaturated readings and valid calibration. Browser captures use unique sequences to avoid treating repeated serial reads as independent sensor samples. Tare/calibration/save are local operations after standard MSP confirms disarmed/stopped motors. Save stores and verifies calibration in IndexedDB, keyed by the normal MSP UID response.

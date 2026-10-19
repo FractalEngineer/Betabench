@@ -1,4 +1,4 @@
-From 091d2c789b3de193d92dd1b28f3de0cd66cd0a64 Mon Sep 17 00:00:00 2001
+From 5fa72d771a4880fd36a6726bf312320e365b504b Mon Sep 17 00:00:00 2001
 From: Yves <calibratedbeats@gmail.com>
 Date: Sun, 18 Oct 2026 20:23:59 +0800
 Subject: [PATCH] Add opt-in HX711 raw sensor driver, resources and MSP
@@ -32,7 +32,7 @@ Subject: [PATCH] Add opt-in HX711 raw sensor driver, resources and MSP
 
 diff --git a/docs/development/HX711.md b/docs/development/HX711.md
 new file mode 100644
-index 000000000..1d65a6998
+index 000000000..0e09bd667
 --- /dev/null
 +++ b/docs/development/HX711.md
 @@ -0,0 +1,56 @@
@@ -62,7 +62,7 @@ index 000000000..1d65a6998
 +Version 1, configured+fresh, raw -42010, sequence 99, age 10 ms, FC timestamp 12345 µs. With browser offset -10 and counts/gram -420, this is +100 g. Request frame (including MSPv2 CRC):
 +
 +```text
-+24 58 3c 00 f0 30 00 00 90
++24 58 3c 00 13 30 00 00 4a
 +```
 +
 +The web app keeps fixed grams in logged measurements and calculates `(raw - offset) / countsPerGram` only for fresh, configured, nonsaturated readings and valid calibration. Browser captures use unique sequences to avoid treating repeated serial reads as independent sensor samples. Tare/calibration/save are local operations after standard MSP confirms disarmed/stopped motors. Save stores and verifies calibration in IndexedDB, keyed by the normal MSP UID response.
@@ -91,7 +91,7 @@ index 000000000..1d65a6998
 +
 +Bench validation is complete. An HX711 was wired to released UART4 pins on a CLRACINGF4 (SCK on TX4/PA0, DOUT on RX4/PA1), assigned with the resource commands above and exercised end to end through the web client on a physical thrust stand: pin assignment, raw counts, sign, sequence and freshness, tare, known-mass calibration and live thrust/current measurement all behave as designed, with 3.3 V logic and the module's RATE pin selecting 10 or 80 samples/s.
 +
-+Host tests in `src/test/hx711` run the production driver against simulated GPIO and time for the pin, clocking, sign, saturation, stuck-low rejection, interrupt-protection, rate, sequence, freshness and timer-wrap cases. Re-check timing, noise and absolute accuracy on your own wiring and stand before trusting load-cell numbers.
++Host tests in `src/test/unit/hx711_unittest.cc` run the production driver against simulated GPIO and time for the pin, clocking, sign, saturation, stuck-low rejection, interrupt-protection, rate, sequence, freshness and timer-wrap cases. Re-check timing, noise and absolute accuracy on your own wiring and stand before trusting load-cell numbers.
 diff --git a/mk/source.mk b/mk/source.mk
 index 9cdf299a7..5608a2d32 100644
 --- a/mk/source.mk

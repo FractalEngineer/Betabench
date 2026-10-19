@@ -7,12 +7,12 @@ Date: 2026-10-18, rebased and re-verified 2026-10-20 (Asia/Taipei).
 - Fork: https://github.com/FractalEngineer/betaflight
 - Branch: `HX711`, tracking `myfork/HX711`; the previous `codex/betabench` branch was removed after verification.
 - Upstream/fork master: `885f12404d4b8cb7e18d03b7847b325b4dcc725e`; the fork's `master` is fast-forwarded to it.
-- Feature commit: `091d2c789b3de193d92dd1b28f3de0cd66cd0a64`, rebased onto that master, with the stuck-low DOUT rejection, its standard GoogleTest coverage, the maintainer review cleanup and the complete CLRACINGF4 resource commands in the guide.
+- Feature commit: `5fa72d771a4880fd36a6726bf312320e365b504b`, rebased onto that master, with the stuck-low DOUT rejection, its standard GoogleTest coverage, the maintainer review cleanup and the complete CLRACINGF4 resource commands in the guide.
 - Exactly one commit ahead and zero behind master: **Add opt-in HX711 raw sensor driver, resources and MSP telemetry**.
 - Config submodule: `0b73c1f29563e390b53c7f3ea631d26d6e969cde`; no gitlink or target-configuration changes.
 - [Compare against base](https://github.com/FractalEngineer/betaflight/compare/885f12404d4b8cb7e18d03b7847b325b4dcc725e...HX711).
 - Upstream PR: [betaflight/betaflight#15868](https://github.com/betaflight/betaflight/pull/15868), with the latest review changes committed. The branch adds licence headers, removes the feature-specific workflow, integrates the test with the standard harness, fixes source ordering and allocates MSP ID `0x3013`.
-- Combined bench branch: `hx711-motor-kill` at `9971bffcdfb4e838b2ba6dd2656e8b83fe22e767`, adding the reviewed HX711 driver to the USB-disconnect motor safety change.
+- Combined bench branch: `hx711-motor-kill` at `7f34f6e22b15aba6c4e3cb5216c0ace8d2e758f4`, adding the reviewed HX711 driver to the USB-disconnect motor safety change.
 
 The complete feature diff contains only HX711 acquisition, PG/resource integration, initialization/polling, one raw MSP response, unit tests and documentation. It contains no motor-control/session/watchdog or calibration logic. Disabled builds exclude HX711 resource names and runtime code. The branch documentation records the bench validation of the driver.
 
