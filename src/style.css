@@ -488,6 +488,30 @@ main {
 .motor-buttons button {
   padding: 8px 4px;
 }
+.log-rate-control {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.log-rate-control > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.log-rate-control output {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.log-rate-control input[type="range"] {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  accent-color: var(--accent);
+}
 .selected {
   border-color: var(--accent);
   color: var(--accent);
@@ -815,6 +839,30 @@ dd {
   border-collapse: collapse;
   font-size: 12px;
   margin: 18px 0;
+}
+.fc-cleanup {
+  border-top: 1px solid var(--border);
+  margin-top: 24px;
+  padding-top: 18px;
+}
+.fc-cleanup .section-heading {
+  margin-bottom: 10px;
+}
+.cleanup-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 9px 14px;
+  margin: 14px 0;
+  font-size: 12px;
+}
+.cleanup-options label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.cleanup-command {
+  max-height: 138px;
+  margin-bottom: 12px;
 }
 .wiring th,
 .wiring td {

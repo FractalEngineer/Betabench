@@ -60,6 +60,7 @@ export type Run = {
   reason?: string;
   profile: Profile;
   selected: number[];
+  sampleRateHz?: number;
   identity: Identity;
   calibration?: Calibration;
   notes: string;

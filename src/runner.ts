@@ -21,7 +21,11 @@ export class RunController {
     selected: number[],
     notes: string,
     private update: (r: Run, status: string) => void,
+    private sampleRateHz = 20,
   ) {
+    this.sampleRateHz = Number.isFinite(sampleRateHz)
+      ? Math.min(50, Math.max(10, Math.round(sampleRateHz / 5) * 5))
+      : 20;
     if (
       !selected.length ||
       selected.some((i) => i < 0 || i >= device.identity.motorCount)
@@ -36,6 +40,7 @@ export class RunController {
       state: "running",
       profile: validateProfile(profile),
       selected: [...selected],
+      sampleRateHz: this.sampleRateHz,
       identity: { ...device.identity },
       calibration: device.calibration ? { ...device.calibration } : undefined,
       notes,
@@ -136,7 +141,7 @@ export class RunController {
         if (!this.halted) await this.stop(String(e));
         return;
       }
-      const period = 50;
+      const period = 1000 / this.sampleRateHz;
       await new Promise((r) =>
         setTimeout(r, Math.max(0, period - (performance.now() - t))),
       );

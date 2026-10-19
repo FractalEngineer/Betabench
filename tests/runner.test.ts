@@ -39,4 +39,23 @@ describe("run lifecycle", () => {
       () => new RunController(new Simulator(), presets[0], [], "", () => {}),
     ).toThrow();
   });
+  it("records a valid log rate and clamps unsupported values", () => {
+    const r = new RunController(
+      new Simulator(),
+      presets[0],
+      [0],
+      "",
+      () => {},
+      50,
+    );
+    expect(r.run.sampleRateHz).toBe(50);
+    expect(
+      new RunController(new Simulator(), presets[0], [0], "", () => {}, 1).run
+        .sampleRateHz,
+    ).toBe(10);
+    expect(
+      new RunController(new Simulator(), presets[0], [0], "", () => {}, 100).run
+        .sampleRateHz,
+    ).toBe(50);
+  });
 });

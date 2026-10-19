@@ -44,7 +44,7 @@ resource HX711_DOUT 1 A01
 save
 ```
 
-Save/Reboot persists the two GPIO assignments. Both are initially unassigned. Missing, identical or occupied resources prevent initialization. Channel A uses gain 128; the module's RATE connection selects 10 or 80 samples/s.
+Save/Reboot persists the two GPIO assignments. Both are initially unassigned. Missing, identical or occupied resources prevent initialization. Channel A uses gain 128; the module's RATE connection selects 10 or 80 samples/s. No driver change is required for 80 samples/s: acquisition is polled by the 100 Hz serial task and only clocks a conversion after DOUT indicates it is ready.
 
 Use compatible 3.3 V logic, common ground and the module's required supply arrangement. Do not connect a 5 V DOUT signal to FC GPIO. Connect the cell's excitation and channel A input according to its wiring diagram.
 
@@ -62,7 +62,7 @@ Serial function, protocol and baud settings are preserved by the helper, so rest
 
 ## Calibration and logging
 
-With motors stopped, remove the load and click Tare. Apply a known load, select its unit and enter its value, then Calibrate. Save retains offset and signed counts/gram **in this browser for this FC UID**. Reconnection to the same origin/browser restores it; clearing site data removes it. Calibration is not written to FC flash. Exported run JSON includes a calibration snapshot.
+With motors stopped, remove the load and click **Tare**. Apply a known load, select its unit and enter its value, then click **Calibrate**. Each action persists and verifies the offset and signed counts/gram **in this browser for this FC UID**. Reconnection to the same origin/browser restores it; clearing site data removes it. Calibration is not written to FC flash. Exported run JSON includes a calibration snapshot.
 
 Captures require at least eight distinct fresh samples over approximately one second. Missing, stale, saturated, unstable or insufficiently separated samples are rejected. Either load-cell polarity is supported. Display units are g, kg, N or lbf; logs always store grams and raw counts. Blackbox is unchanged.
 

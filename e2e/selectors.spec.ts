@@ -99,3 +99,31 @@ test("detect keeps the selected target and its pad dropdowns", async ({
     page.getByRole("combobox", { name: "HX711 data (DOUT)", exact: true }),
   ).toHaveValue("HX711_DOUT 1");
 });
+
+test("disables selected FC resource consumers with an optional backup", async ({
+  page,
+}) => {
+  await page.goto("");
+  await page.getByRole("button", { name: "Try simulator" }).click();
+  await page.getByRole("button", { name: "Load cell", exact: true }).click();
+  const disable = page.getByRole("button", { name: "Disable selected" });
+  await expect(disable).toBeDisabled();
+  await page.getByRole("checkbox", { name: "GPS", exact: true }).check();
+  await page
+    .getByRole("checkbox", { name: "Accelerometer", exact: true })
+    .check();
+  await expect(page.locator(".cleanup-command")).toContainText(
+    "set acc_hardware = NONE",
+  );
+  await expect(disable).toBeEnabled();
+  await disable.click();
+  await expect(
+    page.getByText("Disabled features saved. Reboot the FC to apply."),
+  ).toBeVisible();
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Backup diff all" }).click();
+  expect((await download).suggestedFilename()).toMatch(/diff-all.*\.txt$/);
+  await expect(
+    page.getByText("Configuration backup downloaded."),
+  ).toBeVisible();
+});

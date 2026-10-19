@@ -1,15 +1,35 @@
 import { useEffect, useState } from "react";
-import { Search, Upload } from "lucide-react";
+import { Download, Power, Search, Upload } from "lucide-react";
 import { ComboBox } from "./ComboBox";
 import data from "./targets.json";
 import { hx711Pins, resourceCli, resourcePads, type Pad } from "./resources";
 
+const cleanupOptions = [
+  { id: "gps", label: "GPS", command: "feature -GPS" },
+  { id: "telemetry", label: "Telemetry", command: "feature -TELEMETRY" },
+  { id: "osd", label: "OSD", command: "feature -OSD" },
+  { id: "led", label: "LED strip", command: "feature -LED_STRIP" },
+  { id: "display", label: "Display", command: "feature -DISPLAY" },
+  { id: "esc", label: "ESC sensor", command: "feature -ESC_SENSOR" },
+  {
+    id: "acc",
+    label: "Accelerometer",
+    command: "set acc_hardware = NONE",
+  },
+  { id: "baro", label: "Barometer", command: "set baro_hardware = NONE" },
+  { id: "mag", label: "Magnetometer", command: "set mag_hardware = NONE" },
+] as const;
+
 export function ResourceSetup({
   writeCli,
   detect,
+  backupDiff,
+  disableFeatures,
 }: {
   writeCli?: (lines: string[]) => Promise<void>;
   detect?: () => Promise<string>;
+  backupDiff?: () => Promise<void>;
+  disableFeatures?: (lines: string[]) => Promise<void>;
 }) {
   const [name, setName] = useState("");
   const [query, setQuery] = useState("");
@@ -23,6 +43,10 @@ export function ResourceSetup({
   const [writeStatus, setWriteStatus] = useState("");
   const [detecting, setDetecting] = useState(false);
   const [detectStatus, setDetectStatus] = useState("");
+  const [cleanup, setCleanup] = useState<string[]>([]);
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [cleanupBusy, setCleanupBusy] = useState(false);
+  const [cleanupStatus, setCleanupStatus] = useState("");
   useEffect(() => {
     setCopied(false);
     setWriteStatus("");
@@ -117,6 +141,35 @@ export function ResourceSetup({
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     }
+  const cleanupCommands = cleanupOptions
+    .filter((option) => cleanup.includes(option.id))
+    .map((option) => option.command);
+  async function runBackup() {
+    if (!backupDiff) return;
+    setBackupBusy(true);
+    setCleanupStatus("");
+    try {
+      await backupDiff();
+      setCleanupStatus("Configuration backup downloaded.");
+    } catch (e) {
+      setCleanupStatus(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBackupBusy(false);
+    }
+  }
+  async function runCleanup() {
+    if (!disableFeatures || !cleanupCommands.length) return;
+    setCleanupBusy(true);
+    setCleanupStatus("");
+    try {
+      await disableFeatures(cleanupCommands);
+      setCleanupStatus("Disabled features saved. Reboot the FC to apply.");
+    } catch (e) {
+      setCleanupStatus(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCleanupBusy(false);
+    }
+  }
   return (
     <section className="panel wiring">
       <div className="section-heading">
@@ -320,6 +373,62 @@ export function ResourceSetup({
           </p>
         </>
       )}
+      <div className="fc-cleanup">
+        <div className="section-heading">
+          <h3>Free FC resources</h3>
+          <span>Bench-only changes</span>
+        </div>
+        <p className="subtle">
+          Back up the current configuration first if you want a copy for later
+          restoration. Disabled features stay off until re-enabled or restored
+          and the FC is rebooted.
+        </p>
+        <div className="cleanup-options">
+          {cleanupOptions.map((option) => (
+            <label key={option.id}>
+              <input
+                type="checkbox"
+                checked={cleanup.includes(option.id)}
+                onChange={(event) =>
+                  setCleanup(
+                    event.target.checked
+                      ? [...cleanup, option.id]
+                      : cleanup.filter((id) => id !== option.id),
+                  )
+                }
+              />
+              {option.label}
+            </label>
+          ))}
+        </div>
+        {cleanupCommands.length > 0 && (
+          <pre className="cleanup-command">
+            {[...cleanupCommands, "save"].join("\n")}
+          </pre>
+        )}
+        <div className="actions">
+          <button
+            type="button"
+            disabled={!backupDiff || backupBusy}
+            onClick={() => void runBackup()}
+          >
+            <Download size={14} />
+            {backupBusy ? "Backing up…" : "Backup diff all"}
+          </button>
+          <button
+            className="primary"
+            type="button"
+            disabled={
+              !disableFeatures || !cleanupCommands.length || cleanupBusy
+            }
+            onClick={() => void runCleanup()}
+          >
+            <Power size={14} />
+            {cleanupBusy ? "Disabling…" : "Disable selected"}
+          </button>
+        </div>
+        {cleanupStatus && <p className="status">{cleanupStatus}</p>}
+      </div>
     </section>
   );
 }

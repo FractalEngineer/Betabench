@@ -144,6 +144,15 @@ describe("stock capability discovery", () => {
     await vi.advanceTimersByTimeAsync(1200);
     await tare;
     expect(d.calibration.offset).toBe(100);
+    await d.saveCalibration();
+    expect(d.calibration).toMatchObject({
+      offset: 100,
+      countsPerGram: 0,
+      saved: true,
+    });
+    const tareReloaded = controller({ [MSP.HX_SAMPLE]: fixture() }).d;
+    await tareReloaded.discover();
+    expect(tareReloaded.calibration).toEqual(d.calibration);
     raw = -41900;
     const calibrate = d.calibrate(100);
     await vi.advanceTimersByTimeAsync(1200);

@@ -233,8 +233,7 @@ export class FlightController implements BenchDevice {
     if (
       saved &&
       Number.isFinite(saved.offset) &&
-      Number.isFinite(saved.countsPerGram) &&
-      Math.abs(saved.countsPerGram) >= 0.0001
+      Number.isFinite(saved.countsPerGram)
     )
       this.calibration = { ...saved, saved: true };
     return this;
@@ -368,11 +367,13 @@ export class FlightController implements BenchDevice {
   }
   async saveCalibration() {
     await this.ensureStopped();
+    if (!this.tared && !this.calibration.saved)
+      throw Error("Tare the unloaded stand first");
     if (
-      !Number.isFinite(this.calibration.countsPerGram) ||
-      Math.abs(this.calibration.countsPerGram) < 0.0001
+      !Number.isFinite(this.calibration.offset) ||
+      !Number.isFinite(this.calibration.countsPerGram)
     )
-      throw Error("Calibrate first");
+      throw Error("Tare the unloaded stand first");
     const saved = { ...this.calibration, saved: true };
     await persistCalibration(this.identity.uid!, saved);
     const readback = await loadCalibration(this.identity.uid!);
@@ -553,6 +554,8 @@ export class Simulator implements BenchDevice {
   private cliReply(command: string) {
     const head = command.trim().split(/\s+/)[0].toLowerCase();
     if (head === "save") return "# Simulator: settings saved";
+    if (head === "feature") return "# Simulator: feature updated";
+    if (head === "set") return "# Simulator: setting updated";
     if (head === "version")
       return "# Betaflight / CLRACINGF4 (CLRF) 2026.6.1\r\n# Simulator build";
     if (head === "status") return `# Simulator: ${this.values.length} motors`;

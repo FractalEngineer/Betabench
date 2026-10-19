@@ -107,7 +107,12 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => localStorage.getItem("sidebar-collapsed") === "true",
   );
+  const [logRateHz, setLogRateHz] = useState(() => {
+    const saved = Number(localStorage.getItem("log-rate-hz"));
+    return saved >= 10 && saved <= 50 && saved % 5 === 0 ? saved : 20;
+  });
   const [mass, setMass] = useState(100);
+  const [massDirty, setMassDirty] = useState(false);
   const controller = useRef<RunController | undefined>(undefined);
   const deviceRef = useRef<BenchDevice | undefined>(undefined);
   const runningRef = useRef(false);
@@ -313,6 +318,7 @@ export default function App() {
             setHeld([...run.samples]);
           }
         },
+        logRateHz,
       );
       controller.current = c;
       setActiveRun(c.run);
@@ -532,6 +538,35 @@ export default function App() {
         for (const line of lines) await session.run(line);
       });
       setStatus("HX711 resources written. Reboot the FC to apply them.");
+    } catch (e) {
+      setError(String(e));
+      throw e;
+    }
+  }
+  async function backupFcDiff() {
+    try {
+      const text = await withCliSession((session) => session.run("diff all"));
+      const name = (identity?.name || "flight-controller")
+        .replace(/[^a-z0-9_-]+/gi, "-")
+        .replace(/^-|-$/g, "");
+      download(
+        `betabench-${name}-diff-all-${new Date().toISOString().replaceAll(":", "-")}.txt`,
+        text,
+        "text/plain",
+      );
+      setStatus("FC configuration backup downloaded");
+    } catch (e) {
+      setError(String(e));
+      throw e;
+    }
+  }
+  async function disableFcResources(commands: string[]) {
+    try {
+      await withCliSession(async (session) => {
+        for (const line of [...commands, "save noreboot"])
+          await session.run(line);
+      });
+      setStatus("FC features disabled and saved. Reboot the FC to apply.");
     } catch (e) {
       setError(String(e));
       throw e;
@@ -879,6 +914,26 @@ export default function App() {
                       ),
                     )}
                   </div>
+                  <label className="log-rate-control">
+                    <span>
+                      Log rate
+                      <output>{logRateHz} Hz</output>
+                    </span>
+                    <input
+                      type="range"
+                      min="10"
+                      max="50"
+                      step="5"
+                      value={logRateHz}
+                      disabled={running}
+                      aria-label="Log rate"
+                      onChange={(event) => {
+                        const rate = Number(event.target.value);
+                        setLogRateHz(rate);
+                        localStorage.setItem("log-rate-hz", String(rate));
+                      }}
+                    />
+                  </label>
                   <label className="field-label" htmlFor="notes">
                     Notes
                   </label>
@@ -1127,6 +1182,7 @@ export default function App() {
                             {new Date(r.startedAt).toLocaleString()} · M
                             {r.selected.map((n) => n + 1).join(", M")} ·{" "}
                             {r.samples.length} samples
+                            {r.sampleRateHz ? ` · ${r.sampleRateHz} Hz` : ""}
                           </p>
                           <small>
                             {r.notes || r.identity.name} · {r.reason}
@@ -1243,8 +1299,9 @@ export default function App() {
                       onClick={() =>
                         void action(async () => {
                           await device!.tare();
+                          await device!.saveCalibration();
                           setSample(await device!.sample());
-                          setStatus("Tare complete — calibration is unsaved");
+                          setStatus("Tare complete and saved");
                         })
                       }
                     >
@@ -1264,50 +1321,33 @@ export default function App() {
                             (mass * loadUnits[loadUnit].factor).toPrecision(8),
                           )}
                           disabled={running || fcLocked}
-                          onChange={(e) =>
+                          onChange={(e) => {
                             setMass(
                               Number(e.target.value) /
                                 loadUnits[loadUnit].factor,
-                            )
-                          }
+                            );
+                            setMassDirty(true);
+                          }}
                         />{" "}
                         {loadUnit}
                       </label>
                     </div>
                     <button
+                      className={massDirty ? "primary" : ""}
                       disabled={
                         !identity?.hx711 || running || fcLocked || mass <= 0
                       }
                       onClick={() =>
                         void action(async () => {
                           await device!.calibrate(mass);
+                          await device!.saveCalibration();
                           setSample(await device!.sample());
-                          setStatus("Calibration complete — save to retain it");
+                          setMassDirty(false);
+                          setStatus("Calibration complete and saved");
                         })
                       }
                     >
                       Calibrate
-                    </button>
-                  </div>
-                  <div>
-                    <div>
-                      <h3>Save calibration</h3>
-                      <p>Stored in this browser for this FC. Logs use grams.</p>
-                    </div>
-                    <button
-                      className={
-                        device?.calibration?.saved === false ? "primary" : ""
-                      }
-                      disabled={!identity?.hx711 || running || fcLocked}
-                      onClick={() =>
-                        void action(async () => {
-                          await device!.saveCalibration();
-                          setSample(await device!.sample());
-                          setStatus("Calibration saved and verified");
-                        })
-                      }
-                    >
-                      <Save size={14} /> Save
                     </button>
                   </div>
                 </div>
@@ -1339,8 +1379,18 @@ export default function App() {
                 fallback={<section className="panel">Loading targets…</section>}
               >
                 <ResourceSetup
-                  writeCli={device?.transport ? writeResourceCli : undefined}
+                  writeCli={
+                    device?.transport && !running ? writeResourceCli : undefined
+                  }
                   detect={device?.transport ? readFcResources : undefined}
+                  backupDiff={
+                    device?.transport && !running ? backupFcDiff : undefined
+                  }
+                  disableFeatures={
+                    device?.transport && !running
+                      ? disableFcResources
+                      : undefined
+                  }
                 />
               </Suspense>
             </div>

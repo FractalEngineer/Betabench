@@ -17,7 +17,7 @@ Open the app in desktop Chrome or Edge. Select **Try simulator** to explore with
 
 Choose MiniQuadTestBench or the 0→100→0 sweep from the profile dropdown. Rename it in that same field, edit the timeline or point table, and select motor outputs. Save a copy to retain custom profiles. Secure the stand, enable the outputs for this run, and press **Run profile**. A three-second countdown precedes playback. Stop is always available while connected.
 
-The measurements graph plots live telemetry as soon as a device is connected. Starting a run clears it and plots the recorded sequence; when the run ends the trace holds until you press **Run** on the graph. **Stop** freezes the trace without touching the motors, like an oscilloscope. **Manual motor test** drives each motor with its own slider while outputs are enabled; a slider holds its value until you change it or press **STOP ALL MOTORS**.
+The measurements graph plots live telemetry as soon as a device is connected. Starting a run clears it and plots the recorded sequence; when the run ends the trace holds until you press **Run** on the graph. **Stop** freezes the trace without touching the motors, like an oscilloscope. **Log rate** in Run setup selects 10–50 Hz in 5 Hz steps; 20 Hz is the default and the selected rate is saved with the run. **Manual motor test** drives each motor with its own slider while outputs are enabled; a slider holds its value until you change it or press **STOP ALL MOTORS**.
 
 **CLI** opens a real Betaflight CLI session over the same USB connection, the way Configurator's CLI tab does, so you can read `diff`/`dump`, change settings, and save without leaving the browser. The FC pauses telemetry and motor control while the session is open, and arming stays disabled until it reboots.
 
@@ -43,9 +43,11 @@ The app requires Betaflight MSP API 1.42+ and conventional DShot150/300/600. Rev
 
 _Simulator load-cell setup with a manually selected target; no hardware connected._
 
-Build the optional firmware with `USE_HX711`, connect an HX711 to free GPIO resources, then use **Load cell** to tare the empty stand, enter a known mass in grams, calibrate, and save in this browser for this FC UID. Capture needs stopped motors and stable samples. GPIO assignments alone are stored on the FC. Calibration and logs can be exported with run JSON.
+Build the optional firmware with `USE_HX711`, connect an HX711 to free GPIO resources, then use **Load cell** to tare the empty stand and enter a known mass in grams to calibrate. **Tare** and **Calibrate** persist and verify the result in this browser immediately for this FC UID; there is no separate calibration-save step. Capture needs stopped motors and stable samples. GPIO assignments alone are stored on the FC. Calibration and logs can be exported with run JSON.
 
 Press **Detect** to read the FC's current assignments, including any HX711 pins it already has, then reuse or change them. Otherwise search for and explicitly select a target and choose repurposed pads; no target is preselected. The helper uses the selected target configuration to release every mapped resource on the two GPIOs, then assigns HX711 clock/data and saves. Motor, servo, LED, beeper, PINIO, ADC and bus resources are supported; **Custom GPIO…** accepts a GPIO directly. No port-assignment paste is required and no serial/protocol settings are changed. Custom supports resource dumps from remapped FCs. CLRACINGF4 can use TX4/PA0 for clock and RX4/PA1 for data, with USB for MSP. Copy the commands into Configurator, or press **Write to FC** to run them in a CLI session and save; reboot before the new pins are used. Pins are assigned through normal Betaflight CLI resources without changing the board target. See the [firmware guide](firmware/README.md) for signal voltage, complete commands, restoration, and build instructions.
+
+**Free FC resources** can generate and apply a bench-only cleanup for unused GPS, telemetry, OSD, LED strip, display, ESC sensor, accelerometer, barometer and magnetometer consumers. **Backup diff all** is available as an optional restore point before disabling features. The generated settings are saved without rebooting; restore a backup or re-enable the features when the FC returns to normal use.
 
 ## Development
 

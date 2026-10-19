@@ -18,6 +18,14 @@ test("simulator, profile editing, run, history, calibration and exports", async 
     "color",
     "rgb(255, 87, 87)",
   );
+  const logRate = page.getByLabel("Log rate", { exact: true });
+  await expect(logRate).toHaveValue("20");
+  await expect(logRate).toHaveAttribute("min", "10");
+  await expect(logRate).toHaveAttribute("max", "50");
+  await expect(logRate).toHaveAttribute("step", "5");
+  await logRate.focus();
+  await logRate.press("End");
+  await expect(logRate).toHaveValue("50");
   await page
     .getByRole("combobox", { name: "Throttle profile", exact: true })
     .click();
@@ -40,6 +48,7 @@ test("simulator, profile editing, run, history, calibration and exports", async 
   expect((await download).suggestedFilename()).toMatch(/\.csv$/);
   await page.getByRole("button", { name: "Run history" }).click();
   await expect(page.getByText("complete", { exact: true })).toBeVisible();
+  await expect(page.getByText(/50 Hz/)).toBeVisible();
   await page.getByRole("checkbox", { name: /Overlay/ }).check();
   await expect(page.getByText("Run comparison")).toBeVisible();
   await page.reload();
@@ -49,19 +58,23 @@ test("simulator, profile editing, run, history, calibration and exports", async 
   await page.getByRole("button", { name: "Load cell", exact: true }).click();
   await page.getByRole("button", { name: "Tare", exact: true }).click();
   await expect(
-    page.getByText("Tare complete — calibration is unsaved", { exact: true }),
+    page.getByText("Tare complete and saved", { exact: true }),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Save", exact: true }),
-  ).toHaveClass(/primary/);
-  await page.getByRole("button", { name: "Calibrate", exact: true }).click();
+  ).toHaveCount(0);
+  const calibrate = page.getByRole("button", {
+    name: "Calibrate",
+    exact: true,
+  });
+  await expect(calibrate).not.toHaveClass(/primary/);
+  await page.getByLabel("Known calibration load").fill("150");
+  await expect(calibrate).toHaveClass(/primary/);
+  await calibrate.click();
   await expect(
-    page.getByText("Calibration complete — save to retain it", { exact: true }),
+    page.getByText("Calibration complete and saved", { exact: true }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(
-    page.getByText("Calibration saved and verified", { exact: true }),
-  ).toBeVisible();
+  await expect(calibrate).not.toHaveClass(/primary/);
   expect(errors).toEqual([]);
 });
 test("stop countdown and a hidden page cannot resume a run", async ({
