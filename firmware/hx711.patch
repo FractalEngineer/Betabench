@@ -1,107 +1,44 @@
-From 79e825c32c93d15734977b45c68c28b6ecb7482e Mon Sep 17 00:00:00 2001
+From 091d2c789b3de193d92dd1b28f3de0cd66cd0a64 Mon Sep 17 00:00:00 2001
 From: Yves <calibratedbeats@gmail.com>
 Date: Sun, 18 Oct 2026 20:23:59 +0800
 Subject: [PATCH] Add opt-in HX711 raw sensor driver, resources and MSP
  telemetry
 
 ---
- .github/workflows/hx711.yml               | 47 ++++++++++++++
- docs/development/HX711.md                 | 56 +++++++++++++++++
- mk/source.mk                              |  2 +
- src/main/cli/cli.c                        |  7 +++
- src/main/drivers/hx711.c                  | 74 +++++++++++++++++++++++
- src/main/drivers/hx711.h                  | 18 ++++++
- src/main/drivers/resource.c               |  4 ++
- src/main/drivers/resource.h               |  4 ++
- src/main/fc/init.c                        |  7 +++
- src/main/fc/tasks.c                       |  6 ++
- src/main/msp/msp.c                        | 16 +++++
- src/main/msp/msp_protocol_v2_betaflight.h |  3 +
- src/main/pg/hx711.c                       | 10 +++
- src/main/pg/hx711.h                       | 10 +++
- src/main/pg/pg_ids.h                      |  1 +
- src/test/hx711/hx711_test.c               | 69 +++++++++++++++++++++
- src/test/hx711/stubs/drivers/io.h         | 16 +++++
- src/test/hx711/stubs/drivers/time.h       |  6 ++
- src/test/hx711/stubs/pg/hx711.h           |  6 ++
- src/test/hx711/stubs/platform.h           |  8 +++
- tools/test-hx711.sh                       |  9 +++
- 21 files changed, 379 insertions(+)
- create mode 100644 .github/workflows/hx711.yml
+ docs/development/HX711.md                 |  56 ++++++
+ mk/source.mk                              |   2 +
+ src/main/cli/cli.c                        |   7 +
+ src/main/drivers/hx711.c                  |  95 +++++++++
+ src/main/drivers/hx711.h                  |  40 ++++
+ src/main/drivers/resource.c               |   4 +
+ src/main/drivers/resource.h               |   4 +
+ src/main/fc/init.c                        |   7 +
+ src/main/fc/tasks.c                       |   6 +
+ src/main/msp/msp.c                        |  16 ++
+ src/main/msp/msp_protocol_v2_betaflight.h |   3 +
+ src/main/pg/hx711.c                       |  31 +++
+ src/main/pg/hx711.h                       |  30 +++
+ src/main/pg/pg_ids.h                      |   1 +
+ src/test/Makefile                         |   6 +
+ src/test/unit/hx711_unittest.cc           | 224 ++++++++++++++++++++++
+ src/test/unit/platform.h                  |  17 ++
+ 17 files changed, 549 insertions(+)
  create mode 100644 docs/development/HX711.md
  create mode 100644 src/main/drivers/hx711.c
  create mode 100644 src/main/drivers/hx711.h
  create mode 100644 src/main/pg/hx711.c
  create mode 100644 src/main/pg/hx711.h
- create mode 100644 src/test/hx711/hx711_test.c
- create mode 100644 src/test/hx711/stubs/drivers/io.h
- create mode 100644 src/test/hx711/stubs/drivers/time.h
- create mode 100644 src/test/hx711/stubs/pg/hx711.h
- create mode 100644 src/test/hx711/stubs/platform.h
- create mode 100644 tools/test-hx711.sh
+ create mode 100644 src/test/unit/hx711_unittest.cc
 
-diff --git a/.github/workflows/hx711.yml b/.github/workflows/hx711.yml
-new file mode 100644
-index 000000000..207b42758
---- /dev/null
-+++ b/.github/workflows/hx711.yml
-@@ -0,0 +1,47 @@
-+name: HX711
-+on:
-+  push:
-+    branches: [HX711]
-+  pull_request:
-+    paths:
-+      - '**/*hx711*'
-+      - src/main/msp/**
-+      - src/main/fc/tasks.c
-+      - src/main/fc/init.c
-+      - src/main/cli/cli.c
-+      - src/main/drivers/resource.*
-+      - src/main/pg/pg_ids.h
-+      - mk/source.mk
-+  workflow_dispatch:
-+permissions:
-+  contents: read
-+jobs:
-+  host-test:
-+    runs-on: ubuntu-latest
-+    steps:
-+      - uses: actions/checkout@v4
-+      - run: bash tools/test-hx711.sh
-+  clracingf4:
-+    runs-on: ubuntu-latest
-+    strategy:
-+      matrix:
-+        include:
-+          - name: disabled
-+            flags: ''
-+          - name: hx711
-+            flags: '-DUSE_HX711'
-+    steps:
-+      - uses: actions/checkout@v4
-+      - run: git submodule update --init src/config
-+      - uses: actions/cache@v4
-+        with:
-+          path: |
-+            tools/arm-gnu-toolchain-13.3.rel1-x86_64-arm-none-eabi
-+            downloads/arm-gnu-toolchain-13.3.rel1-x86_64-arm-none-eabi.tar.xz
-+          key: arm-gnu-13.3.rel1-linux
-+      - run: make arm_sdk_install
-+      - run: make CONFIG=CLRACINGF4 EXTRA_FLAGS="${{ matrix.flags }}" -j2
-+      - uses: actions/upload-artifact@v4
-+        with:
-+          name: CLRACINGF4-${{ matrix.name }}
-+          path: obj/*.hex
 diff --git a/docs/development/HX711.md b/docs/development/HX711.md
 new file mode 100644
-index 000000000..d535cc1b3
+index 000000000..1d65a6998
 --- /dev/null
 +++ b/docs/development/HX711.md
 @@ -0,0 +1,56 @@
 +# HX711 MSP extension — wire version 1
 +
-+Opt-in `USE_HX711` adds one read-only native MSPv2 command, `MSP2_SENSOR_HX711 = 0x30F0`. The ID is a project-local allocation in the Betaflight-specific `0x30xx` block and can be moved during review. Without the build define, normal MSP unsupported-command handling applies. No session, motor, tare, calibration or save commands are implemented.
++Opt-in `USE_HX711` adds one read-only native MSPv2 command, `MSP2_SENSOR_HX711 = 0x3013`. The ID is allocated from the next free slot in the Betaflight-specific `0x30xx` block. Without the build define, normal MSP unsupported-command handling applies. No session, motor, tare, calibration or save commands are implemented.
 +
 +Request payload: empty. Response: exactly 18 bytes, little endian.
 +
@@ -134,7 +71,7 @@ index 000000000..d535cc1b3
 +
 +## Building and resources
 +
-+Build with `make CONFIG=CLRACINGF4 EXTRA_FLAGS="-DUSE_HX711"`. Without the define the feature is disabled. Use ARM GNU 13.3.Rel1. Run `bash tools/test-hx711.sh` for simulated GPIO tests.
++Build with `make CONFIG=CLRACINGF4 EXTRA_FLAGS="-DUSE_HX711"`. Without the define the feature is disabled. Use ARM GNU 13.3.Rel1. Run the driver test through the standard Betaflight unit-test harness with `make test` (or `cd src/test && make test_hx711_unittest`).
 +
 +Persistent PG 572 stores only `sckTag` and `doutTag`. Resources `HX711_SCK` and `HX711_DOUT` start unassigned. Release existing resource owners before assigning compatible 3.3 V GPIO. No target configuration is changed. Channel A/gain 128 and hardware-selected 10/80 Hz are supported.
 +
@@ -156,37 +93,39 @@ index 000000000..d535cc1b3
 +
 +Host tests in `src/test/hx711` run the production driver against simulated GPIO and time for the pin, clocking, sign, saturation, stuck-low rejection, interrupt-protection, rate, sequence, freshness and timer-wrap cases. Re-check timing, noise and absolute accuracy on your own wiring and stand before trusting load-cell numbers.
 diff --git a/mk/source.mk b/mk/source.mk
-index 9cdf299a7..854c571ae 100644
+index 9cdf299a7..5608a2d32 100644
 --- a/mk/source.mk
 +++ b/mk/source.mk
-@@ -1,4 +1,5 @@
- PG_SRC = \
+@@ -24,6 +24,7 @@ PG_SRC = \
+             pg/gps_rescue_multirotor.c \
+             pg/gps_rescue_wing.c \
+             pg/gyrodev.c \
 +            pg/hx711.c \
-             pg/adc.c \
-             pg/alt_hold_multirotor.c \
-             pg/alt_hold_wing.c \
-@@ -57,6 +58,7 @@ PG_SRC = \
-             pg/vtx_table.c
- 
- COMMON_SRC = \
+             pg/launch_wing.c \
+             pg/max7456.c \
+             pg/mco.c \
+@@ -106,6 +107,7 @@ COMMON_SRC = \
+             drivers/display.c \
+             drivers/display_canvas.c \
+             drivers/dma.c \
 +            drivers/hx711.c \
-             build/build_config.c \
-             build/debug.c \
-             build/version.c \
+             drivers/io.c \
+             drivers/io_preinit.c \
+             drivers/lcd_console.c \
 diff --git a/src/main/cli/cli.c b/src/main/cli/cli.c
-index ce8cffc7d..75cbb9069 100644
+index ce8cffc7d..44cab91e8 100644
 --- a/src/main/cli/cli.c
 +++ b/src/main/cli/cli.c
-@@ -76,6 +76,9 @@ bool cliMode = false;
- #include "drivers/flash/flash.h"
- #include "drivers/inverter.h"
- #include "drivers/io.h"
+@@ -145,6 +145,9 @@ bool cliMode = false;
+ #include "pg/dronecan.h"
+ #include "pg/flight_plan.h"
+ #include "pg/gyrodev.h"
 +#ifdef USE_HX711
 +#include "pg/hx711.h"
 +#endif
- #include "drivers/io_impl.h"
- #include "drivers/lcd_console.h"
- #include "drivers/light_led.h"
+ #include "pg/max7456.h"
+ #include "pg/mco.h"
+ #include "pg/motor.h"
 @@ -7066,6 +7069,10 @@ typedef struct {
      { owner, pgn, sizeof(type), offsetof(type, member), max }
  
@@ -200,16 +139,37 @@ index ce8cffc7d..75cbb9069 100644
  #endif
 diff --git a/src/main/drivers/hx711.c b/src/main/drivers/hx711.c
 new file mode 100644
-index 000000000..650d5dc83
+index 000000000..d1efd9625
 --- /dev/null
 +++ b/src/main/drivers/hx711.c
-@@ -0,0 +1,74 @@
-+/* SPDX-License-Identifier: GPL-3.0-or-later */
+@@ -0,0 +1,95 @@
++/*
++ * This file is part of Cleanflight and Betaflight.
++ *
++ * Cleanflight and Betaflight are free software. You can redistribute
++ * this software and/or modify this software under the terms of the
++ * GNU General Public License as published by the Free Software
++ * Foundation, either version 3 of the License, or (at your option)
++ * any later version.
++ *
++ * Cleanflight and Betaflight are distributed in the hope that they
++ * will be useful, but WITHOUT ANY WARRANTY; without even the implied
++ * warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
++ * See the GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this software.
++ *
++ * If not, see <http://www.gnu.org/licenses/>.
++ */
++
 +#include "platform.h"
++
 +#ifdef USE_HX711
++
++#include "drivers/hx711.h"
 +#include "drivers/io.h"
 +#include "drivers/time.h"
-+#include "drivers/hx711.h"
 +#include "pg/hx711.h"
 +
 +static IO_t sck, dout;
@@ -280,14 +240,35 @@ index 000000000..650d5dc83
 +#endif
 diff --git a/src/main/drivers/hx711.h b/src/main/drivers/hx711.h
 new file mode 100644
-index 000000000..a62f7cb60
+index 000000000..455d8e710
 --- /dev/null
 +++ b/src/main/drivers/hx711.h
-@@ -0,0 +1,18 @@
-+/* SPDX-License-Identifier: GPL-3.0-or-later */
+@@ -0,0 +1,40 @@
++/*
++ * This file is part of Cleanflight and Betaflight.
++ *
++ * Cleanflight and Betaflight are free software. You can redistribute
++ * this software and/or modify this software under the terms of the
++ * GNU General Public License as published by the Free Software
++ * Foundation, either version 3 of the License, or (at your option)
++ * any later version.
++ *
++ * Cleanflight and Betaflight are distributed in the hope that they
++ * will be useful, but WITHOUT ANY WARRANTY; without even the implied
++ * warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
++ * See the GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this software.
++ *
++ * If not, see <http://www.gnu.org/licenses/>.
++ */
++
 +#pragma once
++
 +#include <stdbool.h>
 +#include <stdint.h>
++
 +#define HX711_CONFIGURED 1
 +#define HX711_FRESH 2
 +#define HX711_SATURATED 4
@@ -299,6 +280,7 @@ index 000000000..a62f7cb60
 +    uint32_t ageMs;
 +    uint32_t timeUs;
 +} hx711Sample_t;
++
 +void hx711Init(void);
 +void hx711Update(void);
 +void hx711GetSample(hx711Sample_t *sample);
@@ -333,19 +315,19 @@ index e30e2b536..2a306a2db 100644
  } resourceOwner_e;
  
 diff --git a/src/main/fc/init.c b/src/main/fc/init.c
-index aaf3e76a2..c7afef945 100644
+index aaf3e76a2..5b947660a 100644
 --- a/src/main/fc/init.c
 +++ b/src/main/fc/init.c
-@@ -159,6 +159,9 @@
- #include "pg/mco.h"
- #include "pg/motor.h"
- #include "pg/pinio.h"
+@@ -59,6 +59,9 @@
+ #include "drivers/dshot.h"
+ #include "drivers/exti.h"
+ #include "drivers/flash/flash.h"
 +#ifdef USE_HX711
 +#include "drivers/hx711.h"
 +#endif
- #include "pg/piniobox.h"
- #include "pg/pin_pull_up_down.h"
- #include "pg/pg.h"
+ #include "drivers/inverter.h"
+ #include "drivers/io.h"
+ #include "drivers/light_led.h"
 @@ -1076,6 +1079,10 @@ void initPhase3(void)
  
      debugInit();
@@ -358,19 +340,19 @@ index aaf3e76a2..c7afef945 100644
      unusedPinsInit();
  #endif
 diff --git a/src/main/fc/tasks.c b/src/main/fc/tasks.c
-index d60ff7da3..732971d9a 100644
+index d60ff7da3..1ad404710 100644
 --- a/src/main/fc/tasks.c
 +++ b/src/main/fc/tasks.c
-@@ -119,6 +119,9 @@
- #endif
- 
- #include "tasks.h"
+@@ -38,6 +38,9 @@
+ #include "drivers/accgyro/accgyro.h"
+ #include "drivers/camera_control.h"
+ #include "drivers/compass/compass.h"
 +#ifdef USE_HX711
 +#include "drivers/hx711.h"
 +#endif
- 
- // taskUpdateRxMain() has occasional peaks in execution time so normal moving average duration estimation doesn't work
- // Decay the estimated max task duration by 1/(1 << RX_TASK_DECAY_SHIFT) on every invocation
+ #include "drivers/sensor.h"
+ #include "drivers/serial.h"
+ #include "drivers/serial_usb_vcp.h"
 @@ -158,6 +161,9 @@ static void taskHandleSerial(timeUs_t currentTimeUs)
  
      bool evaluateMspData = ARMING_FLAG(ARMED) ? MSP_SKIP_NON_MSP_DATA : MSP_EVALUATE_NON_MSP_DATA;
@@ -382,19 +364,19 @@ index d60ff7da3..732971d9a 100644
  
  static void taskBatteryAlerts(timeUs_t currentTimeUs)
 diff --git a/src/main/msp/msp.c b/src/main/msp/msp.c
-index b7d5d08ac..227def2a3 100644
+index b7d5d08ac..6945b9406 100644
 --- a/src/main/msp/msp.c
 +++ b/src/main/msp/msp.c
-@@ -27,6 +27,9 @@
- #include <ctype.h>
- 
- #include "platform.h"
+@@ -60,6 +60,9 @@
+ #include "drivers/dshot.h"
+ #include "drivers/dshot_command.h"
+ #include "drivers/flash/flash.h"
 +#ifdef USE_HX711
 +#include "drivers/hx711.h"
 +#endif
- 
- #include "blackbox/blackbox.h"
- #include "blackbox/blackbox_io.h"
+ #include "drivers/io.h"
+ #include "drivers/motor.h"
+ #include "drivers/osd.h"
 @@ -844,6 +847,19 @@ RAM_CODE static bool mspCommonProcessOutCommand(mspDescriptor_t srcDesc, int16_t
          sbufWriteBuildInfoFlags(dst);
          break;
@@ -416,7 +398,7 @@ index b7d5d08ac..227def2a3 100644
          sbufWriteU8(dst, (uint8_t)constrain(getLegacyBatteryVoltage(), 0, 255));
          sbufWriteU16(dst, (uint16_t)constrain(getMAhDrawn(), 0, 0xFFFF)); // milliamp hours drawn from battery
 diff --git a/src/main/msp/msp_protocol_v2_betaflight.h b/src/main/msp/msp_protocol_v2_betaflight.h
-index 3e0599497..e7957d15e 100644
+index 3e0599497..77e557425 100644
 --- a/src/main/msp/msp_protocol_v2_betaflight.h
 +++ b/src/main/msp/msp_protocol_v2_betaflight.h
 @@ -53,3 +53,6 @@
@@ -425,16 +407,37 @@ index 3e0599497..e7957d15e 100644
  // next new variable type must be >= MSP2TEXT_BATTERY_PROFILE_NAME + 1 (12)
 +
 +// Project-local HX711 raw sample extension, wire version 1.
-+#define MSP2_SENSOR_HX711                  0x30F0
++#define MSP2_SENSOR_HX711                  0x3013
 diff --git a/src/main/pg/hx711.c b/src/main/pg/hx711.c
 new file mode 100644
-index 000000000..3eac0d445
+index 000000000..8bba14830
 --- /dev/null
 +++ b/src/main/pg/hx711.c
-@@ -0,0 +1,10 @@
-+/* SPDX-License-Identifier: GPL-3.0-or-later */
+@@ -0,0 +1,31 @@
++/*
++ * This file is part of Cleanflight and Betaflight.
++ *
++ * Cleanflight and Betaflight are free software. You can redistribute
++ * this software and/or modify this software under the terms of the
++ * GNU General Public License as published by the Free Software
++ * Foundation, either version 3 of the License, or (at your option)
++ * any later version.
++ *
++ * Cleanflight and Betaflight are distributed in the hope that they
++ * will be useful, but WITHOUT ANY WARRANTY; without even the implied
++ * warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
++ * See the GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this software.
++ *
++ * If not, see <http://www.gnu.org/licenses/>.
++ */
++
 +#include "platform.h"
++
 +#ifdef USE_HX711
++
 +#include "pg/pg.h"
 +#include "pg/pg_ids.h"
 +#include "pg/hx711.h"
@@ -444,12 +447,32 @@ index 000000000..3eac0d445
 +#endif
 diff --git a/src/main/pg/hx711.h b/src/main/pg/hx711.h
 new file mode 100644
-index 000000000..9363169ab
+index 000000000..cc3f01026
 --- /dev/null
 +++ b/src/main/pg/hx711.h
-@@ -0,0 +1,10 @@
-+/* SPDX-License-Identifier: GPL-3.0-or-later */
+@@ -0,0 +1,30 @@
++/*
++ * This file is part of Cleanflight and Betaflight.
++ *
++ * Cleanflight and Betaflight are free software. You can redistribute
++ * this software and/or modify this software under the terms of the
++ * GNU General Public License as published by the Free Software
++ * Foundation, either version 3 of the License, or (at your option)
++ * any later version.
++ *
++ * Cleanflight and Betaflight are distributed in the hope that they
++ * will be useful, but WITHOUT ANY WARRANTY; without even the implied
++ * warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
++ * See the GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this software.
++ *
++ * If not, see <http://www.gnu.org/licenses/>.
++ */
++
 +#pragma once
++
 +#include "drivers/io_types.h"
 +#include "pg/pg.h"
 +
@@ -470,156 +493,281 @@ index 5854747a3..82c6ed412 100644
  
  // TODO TBC
  #define PG_DISPLAY_PORT_FBOSD_CONFIG 566
-diff --git a/src/test/hx711/hx711_test.c b/src/test/hx711/hx711_test.c
+diff --git a/src/test/Makefile b/src/test/Makefile
+index ee9c457eb..5cf8c9989 100644
+--- a/src/test/Makefile
++++ b/src/test/Makefile
+@@ -737,6 +737,12 @@ huffman_unittest_SRC := \
+ huffman_unittest_DEFINES := \
+ 		USE_HUFFMAN=
+ 
++hx711_unittest_SRC := \
++		$(USER_DIR)/drivers/hx711.c
++
++hx711_unittest_DEFINES := \
++		USE_HX711=
++
+ rcdevice_unittest_SRC := \
+ 		$(USER_DIR)/common/crc.c \
+ 		$(USER_DIR)/common/bitarray.c \
+diff --git a/src/test/unit/hx711_unittest.cc b/src/test/unit/hx711_unittest.cc
 new file mode 100644
-index 000000000..a8d8c4cf1
+index 000000000..1e9b35962
 --- /dev/null
-+++ b/src/test/hx711/hx711_test.c
-@@ -0,0 +1,69 @@
-+/* SPDX-License-Identifier: GPL-3.0-or-later */
-+// Executes the production driver with simulated GPIO and monotonic time.
-+#include <assert.h>
-+#include <stdio.h>
++++ b/src/test/unit/hx711_unittest.cc
+@@ -0,0 +1,224 @@
++/*
++ * This file is part of Cleanflight and Betaflight.
++ *
++ * Cleanflight and Betaflight are free software. You can redistribute
++ * this software and/or modify this software under the terms of the
++ * GNU General Public License as published by the Free Software
++ * Foundation, either version 3 of the License, or (at your option)
++ * any later version.
++ *
++ * Cleanflight and Betaflight are distributed in the hope that they
++ * will be useful, but WITHOUT ANY WARRANTY; without even the implied
++ * warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
++ * See the GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this software.
++ *
++ * If not, see <http://www.gnu.org/licenses/>.
++ */
++
++#include <stdint.h>
++
++extern "C" {
++
 +#include "platform.h"
 +#include "drivers/io.h"
++#include "drivers/time.h"
 +#include "drivers/hx711.h"
 +#include "pg/hx711.h"
 +
++}
++
++#include "gtest/gtest.h"
++
++extern "C" {
++
 +uint32_t testPrimask;
-+static uint32_t now, bits;
-+static unsigned pulses, reads, owners[3];
-+static bool ready, high, stuckLow;
-+static hx711Config_t config = { 1, 2 };
-+uint32_t millis(void) { return now; }
-+uint32_t micros(void) { return now * 1000; }
-+void delayMicroseconds(uint32_t us) { assert(us == 1); if (high) assert(testPrimask == 1); }
-+const hx711Config_t *hx711Config(void) { return &config; }
-+IO_t IOGetByTag(uint8_t tag) { return tag < 3 ? tag : 0; }
-+bool IOIsFreeOrPreinit(IO_t io) { return !owners[io]; }
-+void IOInit(IO_t io, unsigned owner, unsigned index) { (void)index; owners[io] = owner; }
-+void IOConfigGPIO(IO_t io, unsigned cfg) { (void)io; (void)cfg; }
-+void IOHi(IO_t io) { assert(io == 1 && testPrimask == 1); high = true; pulses++; }
-+void IOLo(IO_t io) { assert(io == 1); high = false; if (pulses == 25) ready = false; }
-+bool IORead(IO_t io) {
-+    assert(io == 2);
-+    if (stuckLow) return false;
-+    if (!high) return !ready;
-+    assert(reads < 24);
++hx711Config_t hx711Config_System = {};
++hx711Config_t hx711Config_Copy = {};
++
++static uint32_t now;
++static uint32_t bits;
++static unsigned pulses;
++static unsigned reads;
++static unsigned owners[3];
++static bool ready;
++static bool high;
++static bool stuckLow;
++
++static unsigned ioIndex(IO_t io)
++{
++    return static_cast<unsigned>(reinterpret_cast<uintptr_t>(io));
++}
++
++uint32_t millis(void)
++{
++    return now;
++}
++
++uint32_t micros(void)
++{
++    return now * 1000;
++}
++
++void delayMicroseconds(timeUs_t us)
++{
++    EXPECT_EQ(1u, us);
++    if (high) {
++        EXPECT_EQ(1u, testPrimask);
++    }
++}
++
++IO_t IOGetByTag(ioTag_t tag)
++{
++    return tag ? reinterpret_cast<IO_t>(static_cast<uintptr_t>(tag)) : nullptr;
++}
++
++bool IOIsFreeOrPreinit(IO_t io)
++{
++    return !owners[ioIndex(io)];
++}
++
++void IOInit(IO_t io, resourceOwner_e owner, uint8_t index)
++{
++    (void)index;
++    owners[ioIndex(io)] = static_cast<unsigned>(owner);
++}
++
++void IOConfigGPIO(IO_t io, ioConfig_t cfg)
++{
++    (void)io;
++    (void)cfg;
++}
++
++void IOHi(IO_t io)
++{
++    EXPECT_EQ(1u, ioIndex(io));
++    EXPECT_EQ(1u, testPrimask);
++    high = true;
++    pulses++;
++}
++
++void IOLo(IO_t io)
++{
++    EXPECT_EQ(1u, ioIndex(io));
++    high = false;
++    if (pulses == 25) {
++        ready = false;
++    }
++}
++
++bool IORead(IO_t io)
++{
++    EXPECT_EQ(2u, ioIndex(io));
++    if (stuckLow) {
++        return false;
++    }
++    if (!high) {
++        return !ready;
++    }
++    EXPECT_LT(reads, 24u);
 +    return !!(bits & (1u << (23 - reads++)));
 +}
-+static hx711Sample_t sample(void) { hx711Sample_t s; hx711GetSample(&s); return s; }
-+static void feed(int32_t value) {
-+    const uint32_t primask = testPrimask;
-+    bits = value & 0xffffff; ready = true; pulses = reads = 0;
-+    hx711Update();
-+    assert(pulses == 25 && reads == 24 && !high && testPrimask == primask);
-+    assert(sample().raw == value);
++
 +}
-+int main(void) {
-+    config.sckTag = 0; hx711Init(); assert(!(sample().flags & HX711_CONFIGURED));
-+    config.sckTag = config.doutTag = 1; hx711Init(); assert(!(sample().flags & HX711_CONFIGURED));
-+    config.doutTag = 2; owners[1] = 99; hx711Init(); assert(!(sample().flags & HX711_CONFIGURED));
-+    owners[1] = 0; hx711Init();
-+    assert(sample().flags == HX711_CONFIGURED && sample().ageMs == UINT32_MAX);
-+    hx711Update(); assert(pulses == 0); // Not-ready reads never generate clocks.
-+    now = 100; feed(0); assert(sample().sequence == 1 && sample().timeUs == 100000);
-+    feed(-1); feed(-8388608); assert(sample().flags & HX711_SATURATED);
-+    feed(8388607); assert(sample().flags & HX711_SATURATED);
-+    feed(-42000); assert(!(sample().flags & HX711_SATURATED));
-+    // DOUT stuck low after the read must not become a fresh zero sample.
++
++static hx711Sample_t sample(void)
++{
++    hx711Sample_t value;
++    hx711GetSample(&value);
++    return value;
++}
++
++static void feed(int32_t value)
++{
++    const uint32_t primask = testPrimask;
++    bits = value & 0xffffff;
++    ready = true;
++    pulses = 0;
++    reads = 0;
++    hx711Update();
++    EXPECT_EQ(25u, pulses);
++    EXPECT_EQ(24u, reads);
++    EXPECT_FALSE(high);
++    EXPECT_EQ(primask, testPrimask);
++    EXPECT_EQ(value, sample().raw);
++}
++
++TEST(Hx711Test, HandlesResourcesPulsesSaturationAndFreshness)
++{
++    hx711Init();
++    EXPECT_EQ(0u, sample().flags & HX711_CONFIGURED);
++
++    hx711Config_System.sckTag = 1;
++    hx711Config_System.doutTag = 1;
++    hx711Init();
++    EXPECT_EQ(0u, sample().flags & HX711_CONFIGURED);
++
++    hx711Config_System.doutTag = 2;
++    owners[1] = 99;
++    hx711Init();
++    EXPECT_EQ(0u, sample().flags & HX711_CONFIGURED);
++
++    owners[1] = 0;
++    hx711Init();
++    EXPECT_EQ(HX711_CONFIGURED, sample().flags);
++    EXPECT_EQ(UINT32_MAX, sample().ageMs);
++
++    hx711Update();
++    EXPECT_EQ(0u, pulses);
++
++    now = 100;
++    feed(0);
++    EXPECT_EQ(1u, sample().sequence);
++    EXPECT_EQ(100000u, sample().timeUs);
++
++    feed(-1);
++    feed(-8388608);
++    EXPECT_NE(0u, sample().flags & HX711_SATURATED);
++    feed(8388607);
++    EXPECT_NE(0u, sample().flags & HX711_SATURATED);
++    feed(-42000);
++    EXPECT_EQ(0u, sample().flags & HX711_SATURATED);
++
 +    const uint32_t stuckSequence = sample().sequence;
-+    stuckLow = true; ready = true; pulses = reads = 0;
++    stuckLow = true;
++    ready = true;
++    pulses = 0;
++    reads = 0;
 +    hx711Update();
 +    stuckLow = false;
-+    assert(pulses == 25 && reads == 0 && sample().sequence == stuckSequence);
-+    assert(sample().raw == -42000);
-+    now += 250; assert(sample().flags & HX711_FRESH);
-+    now++; assert(!(sample().flags & HX711_FRESH));
++    EXPECT_EQ(25u, pulses);
++    EXPECT_EQ(0u, reads);
++    EXPECT_EQ(stuckSequence, sample().sequence);
++    EXPECT_EQ(-42000, sample().raw);
++
++    now += 250;
++    EXPECT_NE(0u, sample().flags & HX711_FRESH);
++    now++;
++    EXPECT_EQ(0u, sample().flags & HX711_FRESH);
++
 +    const uint32_t sequence = sample().sequence;
-+    for (unsigned i = 0; i < 80; i++) { now += 13; feed(100 + i); }
-+    for (unsigned i = 0; i < 10; i++) { now += 100; feed(-100 - (int)i); }
-+    assert(sample().sequence == sequence + 90);
-+    now = UINT32_MAX - 100; feed(10); now = 149; assert(sample().ageMs == 250 && (sample().flags & HX711_FRESH));
-+    now++; assert(!(sample().flags & HX711_FRESH));
-+    testPrimask = 1; feed(42); assert(testPrimask == 1);
-+    puts("PASS: HX711 readiness, 24-bit polarity, 25 pulses, stuck-low reject, IRQ protection, resources, rates and freshness/wrap");
-+    return 0;
++    for (unsigned i = 0; i < 80; i++) {
++        now += 13;
++        feed(100 + static_cast<int32_t>(i));
++    }
++    for (unsigned i = 0; i < 10; i++) {
++        now += 100;
++        feed(-100 - static_cast<int32_t>(i));
++    }
++    EXPECT_EQ(sequence + 90, sample().sequence);
++
++    now = UINT32_MAX - 100;
++    feed(10);
++    now = 149;
++    EXPECT_EQ(250u, sample().ageMs);
++    EXPECT_NE(0u, sample().flags & HX711_FRESH);
++    now++;
++    EXPECT_EQ(0u, sample().flags & HX711_FRESH);
++
++    testPrimask = 1;
++    feed(42);
++    EXPECT_EQ(1u, testPrimask);
 +}
-diff --git a/src/test/hx711/stubs/drivers/io.h b/src/test/hx711/stubs/drivers/io.h
-new file mode 100644
-index 000000000..f5e26a7cc
---- /dev/null
-+++ b/src/test/hx711/stubs/drivers/io.h
-@@ -0,0 +1,16 @@
-+/* SPDX-License-Identifier: GPL-3.0-or-later */
-+#pragma once
-+#include <stdint.h>
-+#include <stdbool.h>
-+typedef unsigned IO_t;
-+#define OWNER_HX711_SCK 1
-+#define OWNER_HX711_DOUT 2
-+#define IOCFG_OUT_PP 1
-+#define IOCFG_IPU 2
-+IO_t IOGetByTag(uint8_t tag);
-+bool IOIsFreeOrPreinit(IO_t io);
-+void IOInit(IO_t io, unsigned owner, unsigned index);
-+void IOConfigGPIO(IO_t io, unsigned cfg);
-+void IOLo(IO_t io);
-+void IOHi(IO_t io);
-+bool IORead(IO_t io);
-diff --git a/src/test/hx711/stubs/drivers/time.h b/src/test/hx711/stubs/drivers/time.h
-new file mode 100644
-index 000000000..078b46bdc
---- /dev/null
-+++ b/src/test/hx711/stubs/drivers/time.h
-@@ -0,0 +1,6 @@
-+/* SPDX-License-Identifier: GPL-3.0-or-later */
-+#pragma once
-+#include <stdint.h>
-+uint32_t millis(void);
-+uint32_t micros(void);
-+void delayMicroseconds(uint32_t value);
-diff --git a/src/test/hx711/stubs/pg/hx711.h b/src/test/hx711/stubs/pg/hx711.h
-new file mode 100644
-index 000000000..bddaf0e31
---- /dev/null
-+++ b/src/test/hx711/stubs/pg/hx711.h
-@@ -0,0 +1,6 @@
-+/* SPDX-License-Identifier: GPL-3.0-or-later */
-+#pragma once
-+#include <stdint.h>
-+typedef struct { uint8_t sckTag, doutTag;  } hx711Config_t;
-+const hx711Config_t *hx711Config(void);
-+hx711Config_t *hx711ConfigMutable(void);
-diff --git a/src/test/hx711/stubs/platform.h b/src/test/hx711/stubs/platform.h
-new file mode 100644
-index 000000000..d8cfdb551
---- /dev/null
-+++ b/src/test/hx711/stubs/platform.h
-@@ -0,0 +1,8 @@
-+/* SPDX-License-Identifier: GPL-3.0-or-later */
-+#pragma once
-+#include <stdbool.h>
-+#include <stdint.h>
+diff --git a/src/test/unit/platform.h b/src/test/unit/platform.h
+index ff1e26673..c63e54d93 100644
+--- a/src/test/unit/platform.h
++++ b/src/test/unit/platform.h
+@@ -118,6 +118,23 @@ typedef struct
+ 
+ #define MCU_TYPE_NAME "UNIT_TEST"
+ 
 +extern uint32_t testPrimask;
-+static inline uint32_t __get_PRIMASK(void) { return testPrimask; }
-+static inline void __disable_irq(void) { testPrimask=1; }
-+static inline void __set_PRIMASK(uint32_t value) { testPrimask=value; }
-diff --git a/tools/test-hx711.sh b/tools/test-hx711.sh
-new file mode 100644
-index 000000000..a3568ac91
---- /dev/null
-+++ b/tools/test-hx711.sh
-@@ -0,0 +1,9 @@
-+#!/usr/bin/env bash
-+set -euo pipefail
-+cd "$(dirname "$0")/.."
-+mkdir -p obj/hx711-test
-+cc -std=c11 -Wall -Wextra -Werror -DUSE_HX711 \
-+  -Isrc/test/hx711/stubs -Isrc/main \
-+  src/test/hx711/hx711_test.c src/main/drivers/hx711.c \
-+  -o obj/hx711-test/test
-+obj/hx711-test/test
++
++static inline uint32_t __get_PRIMASK(void)
++{
++    return testPrimask;
++}
++
++static inline void __disable_irq(void)
++{
++    testPrimask = 1;
++}
++
++static inline void __set_PRIMASK(uint32_t value)
++{
++    testPrimask = value;
++}
++
+ #include "target.h"
+ 
+ #include "target/common_defaults_post.h"
 -- 
 2.55.0.windows.3
 

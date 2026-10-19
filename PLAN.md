@@ -44,14 +44,15 @@ Betaflight changes are limited to an opt-in `USE_HX711` raw sensor driver, persi
   - Exercised on physical hardware with the web app and the HX711 firmware: USB/MSP connection, motor output and Stop, HX711 resource mapping, load-cell readings and browser tare/calibration all work.
 - [x] Rebase the HX711 commit onto current upstream master, fast-forward the fork's `master`, and keep the branch exactly one commit ahead.
   - CI run 39251958210 passed host tests plus both `CLRACINGF4` builds; the exported patch reproduces tree `c1f8e144d61bdc3766994c3c37d8041ac58e8759`.
-- [x] Record the bench validation in the firmware docs and draft the upstream PR; the PR is not opened yet.
+- [x] Record the bench validation in the firmware docs and open upstream PR #15868.
+- [x] Address the maintainer review by moving the HX711 test into the standard unit-test harness, adding standard licence headers, correcting include/source ordering, removing the feature-specific workflow, and allocating MSP command `0x3013`.
 - [x] Plot live telemetry continuously, reset the graph when a sequence starts, and hold the trace until the operator resumes it.
 - [x] Add per-motor manual test sliders behind the existing enable gate, released by Stop or by clearing the enable checkbox.
 - [x] Add a CLI tab that opens a real Betaflight CLI session over the MSP port (the `#` handshake Configurator uses) plus a Write to FC button for the generated resource commands.
 - [x] Read current from MSP_BATTERY_STATE byte 6; the previous byte-5 read mixed in the mAh-drawn high byte and reported a far too large current.
   - 41 unit tests, 13 Edge browser tests and the production build passed.
 
-The upstream firmware PR description is prepared and has not been opened. The branch is rebased onto current upstream master and is exactly one commit ahead; the fork's `master` tracks upstream.
+The upstream firmware PR is open as betaflight/betaflight#15868. The branch is rebased onto current upstream master and is exactly one commit ahead; the maintainer review cleanup is included in that commit. The combined `hx711-motor-kill` branch adds the USB-disconnect motor safety change and builds successfully for CLRACINGF4.
 
 ## Profiles and editor
 
@@ -69,7 +70,7 @@ Log timestamps, requested throttle, requested/transmitted outputs, electrical va
 
 One HX711, channel A/gain 128; hardware RATE selects 10 or 80 samples/s. Poll readiness without waiting for conversions. Clock each high pulse with interrupts protected, restore prior interrupt state, sign-extend 24 bits, report saturation and freshness. Persist only `HX711_SCK` and `HX711_DOUT` resource assignments. Reject missing, identical or occupied pins during initialization.
 
-MSPv2 project-local command `0x30F0`, wire version 1: flags, signed raw counts, sequence, age in ms and FC timestamp in µs. No write commands. See firmware/PROTOCOL.md.
+MSPv2 project-local command `0x3013`, wire version 1: flags, signed raw counts, sequence, age in ms and FC timestamp in µs. No write commands. See firmware/PROTOCOL.md.
 
 Tare/calibrate/save require stopped motors. Capture at least eight distinct fresh nonsaturated samples over about one second; reject unstable or insufficiently separated readings without replacing the previous calibration. Calibration supports either sensor polarity. Save explicitly stores offset and counts/gram in this browser, keyed by FC UID, and verifies readback. Firmware flash contains GPIO assignments only.
 

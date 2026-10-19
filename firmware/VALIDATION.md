@@ -1,21 +1,22 @@
 # Validation and feature preparation
 
-Date: 2026-10-18, rebased and re-verified 2026-10-19 (Asia/Taipei).
+Date: 2026-10-18, rebased and re-verified 2026-10-20 (Asia/Taipei).
 
 ## Firmware
 
 - Fork: https://github.com/FractalEngineer/betaflight
 - Branch: `HX711`, tracking `myfork/HX711`; the previous `codex/betabench` branch was removed after verification.
 - Upstream/fork master: `885f12404d4b8cb7e18d03b7847b325b4dcc725e`; the fork's `master` is fast-forwarded to it.
-- Feature HEAD: `79e825c32c93d15734977b45c68c28b6ecb7482e`, rebased onto that master, with the stuck-low DOUT rejection, its host-test case and the complete CLRACINGF4 resource commands in the guide.
+- Feature commit: `091d2c789b3de193d92dd1b28f3de0cd66cd0a64`, rebased onto that master, with the stuck-low DOUT rejection, its standard GoogleTest coverage, the maintainer review cleanup and the complete CLRACINGF4 resource commands in the guide.
 - Exactly one commit ahead and zero behind master: **Add opt-in HX711 raw sensor driver, resources and MSP telemetry**.
 - Config submodule: `0b73c1f29563e390b53c7f3ea631d26d6e969cde`; no gitlink or target-configuration changes.
 - [Compare against base](https://github.com/FractalEngineer/betaflight/compare/885f12404d4b8cb7e18d03b7847b325b4dcc725e...HX711).
-- Upstream PR description prepared; not opened yet.
+- Upstream PR: [betaflight/betaflight#15868](https://github.com/betaflight/betaflight/pull/15868), with the latest review changes committed. The branch adds licence headers, removes the feature-specific workflow, integrates the test with the standard harness, fixes source ordering and allocates MSP ID `0x3013`.
+- Combined bench branch: `hx711-motor-kill` at `9971bffcdfb4e838b2ba6dd2656e8b83fe22e767`, adding the reviewed HX711 driver to the USB-disconnect motor safety change.
 
-The complete feature diff contains only HX711 acquisition, PG/resource integration, initialization/polling, one raw MSP response, host tests, documentation and its CI matrix: 21 files, 379 added lines. It contains no motor-control/session/watchdog or calibration logic. Disabled builds exclude HX711 resource names and runtime code. The branch documentation records the bench validation of the driver.
+The complete feature diff contains only HX711 acquisition, PG/resource integration, initialization/polling, one raw MSP response, unit tests and documentation. It contains no motor-control/session/watchdog or calibration logic. Disabled builds exclude HX711 resource names and runtime code. The branch documentation records the bench validation of the driver.
 
-The original sibling checkout remains detached at its prior base, with its existing modified `src/config` and untracked `lib/main/dronecan/` preserved. The isolated feature worktree is clean.
+The original sibling checkout retains its existing modified `src/config` and untracked `lib/main/dronecan/`; neither is part of the combined branch commit. The isolated feature worktree is clean.
 
 ## Reproducible patch
 
@@ -25,28 +26,23 @@ The original sibling checkout remains detached at its prior base, with its exist
 git format-patch --stdout 885f12404d4b8cb7e18d03b7847b325b4dcc725e..HX711
 ```
 
-It was verified by checking out the upstream base in an isolated worktree, applying the patch with `git am`, and comparing the resulting tree against feature HEAD. Both trees are:
-
-```text
-c1f8e144d61bdc3766994c3c37d8041ac58e8759
-```
-
-Use `git am` to preserve the exported commit metadata in a normal clean checkout. The previous bench-extension patch and its branch have been removed.
+Use `git am` to preserve the exported commit metadata in a clean checkout. The previous bench-extension patch and its branch have been removed.
 
 ## Firmware checks
 
-[CI run 39251958210](https://github.com/FractalEngineer/betaflight/actions/runs/39251958210) passed on the rebased feature HEAD `79e825c3`: host tests plus `CLRACINGF4` builds with the feature disabled and enabled. ARM GNU 13.3.Rel1 / GCC 13.3.1; commands are in [README.md](README.md). The memory figures below are read from that run.
+[CI run 39251958210](https://github.com/FractalEngineer/betaflight/actions/runs/39251958210) passed on the prior feature commit `79e825c3`: host tests plus `CLRACINGF4` builds with the feature disabled and enabled. The reviewed commit and combined bench branch were then rebuilt locally with ARM GNU 14.3.Rel1; commands are in [README.md](README.md).
 
 | CLRACINGF4 variant | FLASH1 bytes / 992 KiB | RAM bytes / 128 KiB | CCM bytes / 64 KiB |
 | ------------------ | ---------------------: | ------------------: | -----------------: |
-| Feature disabled   |                 545309 |               87472 |              13360 |
-| USE_HX711          |                 546049 |               87520 |              13360 |
+| Feature disabled   |                 545829 |               87512 |              13360 |
+| USE_HX711          |                 546729 |               87544 |              13360 |
+| HX711 + motor kill |                 547161 |               87544 |              13360 |
 
-HEX artifacts are attached to the CI run. Host tests execute the production driver with simulated GPIO/time: unassigned/identical/occupied resources, no clocks while not ready, exactly 25 pulses and 24 data reads, sign extension and saturation, a stuck-low DOUT rejecting the frame, protected high pulses/restored interrupt mask, 10/80 Hz sample feeds, sequence, freshness and timer wrap. `git diff --check` passed.
+The standard GoogleTest target executes the production driver with simulated GPIO/time: unassigned/identical/occupied resources, no clocks while not ready, exactly 25 pulses and 24 data reads, sign extension and saturation, a stuck-low DOUT rejecting the frame, protected high pulses/restored interrupt mask, 10/80 Hz sample feeds, sequence, freshness and timer wrap. The HX711 test and both CLRACINGF4 builds pass; `git diff --check` passes. The full local Windows unit run stops later in the existing `arming_prevention_unittest` because that platform lacks `ffs`; the HX711 test completes in the standard harness before that unrelated failure.
 
 ## Web checks
 
-- 42 unit tests pass: preset boundaries, ramp interpolation, stop/minimum distinction, point motion/snapping/deletion, legacy-profile migration, MSP framing/fragmentation/corruption, signed HX711 packet decoding, MSP battery current field, stock capability checks, arming inhibition failures, response deadlines and Stop priority, selectable log-rate bounds, browser tare/calibration/UID persistence, unstable/stale rejection, resource aliases and HX711 pin detection, target snapshot integrity, run persistence/recovery, CSV/JSON and countdown cancellation.
+- 42 unit tests pass with the `0x3013` client command: preset boundaries, ramp interpolation, stop/minimum distinction, point motion/snapping/deletion, legacy-profile migration, MSP framing/fragmentation/corruption, signed HX711 packet decoding, MSP battery current field, stock capability checks, arming inhibition failures, response deadlines and Stop priority, selectable log-rate bounds, browser tare/calibration/UID persistence, unstable/stale rejection, resource aliases and HX711 pin detection, target snapshot integrity, run persistence/recovery, CSV/JSON and countdown cancellation.
 - 15 desktop Edge browser tests pass: simulator run/edit/save/history/overlay/exports, selectable 10–50 Hz logging, both-axis point dragging, metric toggles, unit conversion/persistence, target/pad/custom resource generation, Detect and Write to FC, optional `diff all` backup and feature cleanup, identical-pin rejection, light theme, direct-save tare/calibration, countdown stop, hidden-page abort, delayed-command abort, storage failure, mobile overflow, live plot hold/resume, manual motor sliders, the CLI session and the BB favicon.
 - Desktop dark/light and 390 px mobile layouts visually inspected, including the four simultaneous measurement curves, the manual motor panel, the held measurement trace and the CLI console.
 - Production TypeScript/Vite build passed. Charting and the separately loaded target snapshot emit a non-fatal chunk-size advisory.

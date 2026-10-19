@@ -13,7 +13,7 @@ export const MSP = {
   MOTOR_TELEMETRY: 139,
   ARMING_DISABLE: 99,
   SET_MOTOR: 214,
-  HX_SAMPLE: 0x30f0,
+  HX_SAMPLE: 0x3013,
 } as const;
 export const PROTOCOL_VERSION = 1;
 export const HX = { CONFIGURED: 1, FRESH: 2, SATURATED: 4 } as const;

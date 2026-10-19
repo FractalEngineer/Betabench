@@ -13,7 +13,7 @@ const response = (
 describe("MSP transport framing", () => {
   it("encodes known vectors", () => {
     expect([...frame(1)]).toEqual([36, 77, 60, 0, 1, 1]);
-    expect([...frame(0x30f0)]).toEqual([36, 88, 60, 0, 240, 48, 0, 0, 144]);
+    expect([...frame(0x3013)]).toEqual([36, 88, 60, 0, 19, 48, 0, 0, 74]);
   });
   it("accepts fragmented and concatenated v1/v2 responses", () => {
     const p = new Parser();

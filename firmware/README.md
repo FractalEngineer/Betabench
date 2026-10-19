@@ -2,7 +2,7 @@
 
 [FractalEngineer/betaflight — HX711](https://github.com/FractalEngineer/betaflight/tree/HX711) is based on upstream master `885f12404d4b8cb7e18d03b7847b325b4dcc725e`, with one commit on top. The fork's master is fast-forwarded to that base. Configuration submodule `0b73c1f29563e390b53c7f3ea631d26d6e969cde` and board targets are unchanged.
 
-The feature adds only HX711 acquisition, configurable GPIO resources and a read-only MSP sample. The previous Betabench session, motor watchdog, combined telemetry and firmware calibration extensions have been removed. Motors use standard Betaflight MSP. Tare, calibration and run logging belong to the web app. An upstream PR description is prepared; no PR has been opened yet.
+The feature adds only HX711 acquisition, configurable GPIO resources and a read-only MSP sample. The previous Betabench session, motor watchdog, combined telemetry and firmware calibration extensions have been removed. Motors use standard Betaflight MSP. Tare, calibration and run logging belong to the web app. The upstream pull request is [betaflight/betaflight#15868](https://github.com/betaflight/betaflight/pull/15868); review cleanup is committed on the fork branch. The `hx711-motor-kill` fork branch combines this driver with the USB-disconnect motor safety change for bench builds.
 
 ## Build
 
@@ -16,7 +16,7 @@ git submodule update --init src/config
 make arm_sdk_install
 make CONFIG=CLRACINGF4 -j8 # feature disabled by default
 make CONFIG=CLRACINGF4 EXTRA_FLAGS="-DUSE_HX711" -j8
-bash tools/test-hx711.sh
+make test
 ```
 
 An external toolchain can be selected with `ARM_SDK_PREFIX=/absolute/path/bin/arm-none-eabi-`. Outputs are under `obj/`; copy each build's HEX before building another variant. The browser does not flash firmware. No board-specific build flags or default pin assignments are added.
