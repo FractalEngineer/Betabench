@@ -46,7 +46,14 @@ test("metric toggles, units, target/pad selection and custom CLI", async ({
   page,
 }) => {
   await page.goto("");
-  for (const metric of ["Current", "Voltage", "Power", "Thrust"])
+  for (const metric of [
+    "Current",
+    "Voltage",
+    "Power",
+    "Thrust",
+    "Throttle",
+    "Efficiency",
+  ])
     await expect(
       page.getByLabel(`Show ${metric}`, { exact: true }),
     ).toBeChecked();
@@ -122,15 +129,21 @@ test("metric toggles, units, target/pad selection and custom CLI", async ({
     .fill(
       "resource MOTOR 3 B08\nresource LED_STRIP 1 B08\nresource SERIAL_RX 2 A03\nset rx_uart = UART2\nset msp_1_uart = VCP",
     );
-  await page.getByLabel("Clock GPIO").fill("B08");
-  await page.getByLabel("Data GPIO").fill("A03");
+  await page
+    .getByLabel("HX711 clock (SCK)", { exact: true })
+    .selectOption("LED_STRIP 1");
+  await page
+    .getByLabel("HX711 data (DOUT)", { exact: true })
+    .selectOption("SERIAL_RX 2");
   await expect(page.getByTestId("resource-cli")).toContainText(
     "resource SERIAL_RX 2 NONE",
   );
   await expect(page.getByTestId("resource-cli")).toContainText(
     "resource HX711_SCK 1 B08",
   );
-  await page.getByLabel("Data GPIO").fill("B08");
+  await page
+    .getByLabel("HX711 data (DOUT)", { exact: true })
+    .selectOption("LED_STRIP 1");
   await expect(page.getByRole("alert")).toContainText(
     "Choose different GPIO pads",
   );

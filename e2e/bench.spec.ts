@@ -10,6 +10,14 @@ test("simulator, profile editing, run, history, calibration and exports", async 
   await expect(
     page.getByText("Virtual CLRACINGF4", { exact: true }),
   ).toBeVisible();
+  await expect(page.getByLabel("Show Throttle", { exact: true })).toBeChecked();
+  await expect(
+    page.getByLabel("Show Efficiency", { exact: true }),
+  ).toBeChecked();
+  await expect(page.getByLabel("Show Voltage", { exact: true })).toHaveCSS(
+    "color",
+    "rgb(255, 87, 87)",
+  );
   await page
     .getByRole("combobox", { name: "Throttle profile", exact: true })
     .click();
@@ -43,6 +51,9 @@ test("simulator, profile editing, run, history, calibration and exports", async 
   await expect(
     page.getByText("Tare complete — calibration is unsaved", { exact: true }),
   ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Save", exact: true }),
+  ).toHaveClass(/primary/);
   await page.getByRole("button", { name: "Calibrate", exact: true }).click();
   await expect(
     page.getByText("Calibration complete — save to retain it", { exact: true }),

@@ -10,10 +10,12 @@ import {
 import type { Sample } from "./types";
 import { loadUnits, type LoadUnit } from "./calibration";
 export const metrics = {
-  current: { label: "Current", unit: "A", color: "#3599ff" },
-  voltage: { label: "Voltage", unit: "V", color: "#ffbb00" },
-  power: { label: "Power", unit: "W", color: "#ca83ed" },
+  current: { label: "Current", unit: "A", color: "#3b82f6" },
+  voltage: { label: "Voltage", unit: "V", color: "#ff5757" },
+  power: { label: "Power", unit: "W", color: "#a855f7" },
   thrustG: { label: "Thrust", unit: "g", color: "#35c581" },
+  throttle: { label: "Throttle", unit: "%", color: "#ffbb00" },
+  efficiency: { label: "Efficiency", unit: "g/W", color: "#14b8a6" },
 } as const;
 export type Metric = keyof typeof metrics;
 export function MetricSelector({
@@ -79,8 +81,9 @@ export function MeasurementsChart({
                 yAxisId={key}
                 orientation={i % 2 ? "right" : "left"}
                 stroke={metrics[key].color}
-                width={46}
+                width={selected.length > 4 ? 32 : 46}
                 tickCount={5}
+                domain={key === "throttle" ? [0, 100] : ["auto", "auto"]}
                 label={{
                   value: key === "thrustG" ? unit : metrics[key].unit,
                   position: "insideTop",
@@ -122,6 +125,12 @@ export function MeasurementsChart({
                         q.thrustG === undefined
                           ? undefined
                           : q.thrustG * loadUnits[unit].factor,
+                      efficiency:
+                        q.thrustG !== undefined &&
+                        q.power !== undefined &&
+                        q.power > 0
+                          ? q.thrustG / q.power
+                          : undefined,
                     }))}
                   dataKey={key}
                   yAxisId={key}

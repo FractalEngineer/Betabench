@@ -5,7 +5,7 @@
 
 A browser-based motor and ESC test bench using a Betaflight flight controller.
 
-**[Open Betabench](https://fractalengineer.github.io/Betabench/)** · [Implementation checklist](PLAN.md) · [Firmware and wiring](firmware/README.md) · [MSP extension](firmware/PROTOCOL.md)
+**[Open Betabench](https://fractalengineer.github.io/Betabench/)** · [Implementation checklist](PLAN.md) · [Firmware and wiring](firmware/README.md) · [Firmware pull request #15868](https://github.com/betaflight/betaflight/pull/15868) · [MSP extension](firmware/PROTOCOL.md)
 
 ![BetaBench running the MiniQuadTestBench profile with simulated current, voltage, power and thrust measurements](docs/images/mqtb-profile.png)
 
@@ -35,7 +35,7 @@ The app requires Betaflight MSP API 1.42+ and conventional DShot150/300/600. Rev
 - MiniQuadTestBench is a normalized 28-second sequence; the triangular sweep defaults to six seconds each way.
 - Profiles and runs are saved in IndexedDB in this browser and origin. Clearing browser/site data removes them. Browser history is not a backup: export runs you want to keep.
 - CSV contains timestamped measurements with units, requested throttle/outputs, transmitted outputs, available FC output readback, and optional load-cell/RPM data. JSON contains the complete run and its profile, equipment notes, firmware identity, and calibration snapshot. JSON runs and profiles can be imported.
-- Current, voltage, power and thrust curves can be displayed together in distinct colors. History supports run overlays. Load-cell units can be g, kg, N or lbf; exported measurements remain in grams. Missing measurements stay empty; thrust efficiency is calculated only with valid thrust and power. Simulated runs are explicitly marked.
+- Throttle, voltage, current, power, thrust and efficiency curves can be displayed together in distinct colors. History supports run overlays. Load-cell units can be g, kg, N or lbf; exported measurements remain in grams. Missing measurements stay empty; thrust efficiency is calculated only with valid thrust and power. Simulated runs are explicitly marked.
 
 ## Load cell
 

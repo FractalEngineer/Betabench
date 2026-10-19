@@ -77,3 +77,25 @@ test("target search starts empty, requires selection, supports keyboard and clea
   await page.getByRole("button", { name: "Load cell", exact: true }).click();
   await expect(target).toHaveValue("");
 });
+
+test("detect keeps the selected target and its pad dropdowns", async ({
+  page,
+}) => {
+  await page.goto("");
+  await page.getByRole("button", { name: "Try simulator" }).click();
+  await page.getByRole("button", { name: "Load cell", exact: true }).click();
+  const target = page.getByRole("combobox", {
+    name: "Flight controller target",
+    exact: true,
+  });
+  await target.fill("clracing f4");
+  await page.getByRole("option", { name: "CLRACINGF4", exact: true }).click();
+  await page.getByRole("button", { name: "Detect", exact: true }).click();
+  await expect(target).toHaveValue("CLRACINGF4");
+  await expect(
+    page.getByRole("combobox", { name: "HX711 clock (SCK)", exact: true }),
+  ).toHaveValue("HX711_SCK 1");
+  await expect(
+    page.getByRole("combobox", { name: "HX711 data (DOUT)", exact: true }),
+  ).toHaveValue("HX711_DOUT 1");
+});

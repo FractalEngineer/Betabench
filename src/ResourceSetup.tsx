@@ -23,23 +23,28 @@ export function ResourceSetup({
   const [writeStatus, setWriteStatus] = useState("");
   const [detecting, setDetecting] = useState(false);
   const [detectStatus, setDetectStatus] = useState("");
-  useEffect(
-    () => {
-      setCopied(false);
-      setWriteStatus("");
-    },
-    [name, sckKey, doutKey, customSck, customDout, customResources],
-  );
+  useEffect(() => {
+    setCopied(false);
+    setWriteStatus("");
+  }, [name, sckKey, doutKey, customSck, customDout, customResources]);
   const target = data.targets.find((t) => t.name === name);
-  const pads: Pad[] = target?.pads ?? resourcePads(customResources);
+  const pads: Pad[] = customResources
+    ? resourcePads(customResources)
+    : (target?.pads ?? []);
   const sck =
-    target && sckKey !== "gpio"
+    sckKey && sckKey !== "gpio"
       ? (pads.find((p) => p.label === sckKey) ?? pads[0])
       : { label: "SCK", resource: "", index: 1, pin: customSck.toUpperCase() };
   const dout =
-    target && doutKey !== "gpio"
+    doutKey && doutKey !== "gpio"
       ? (pads.find((p) => p.label === doutKey) ??
-        pads.find((p) => p.pin !== sck.pin)!)
+        pads.find((p) => p.pin !== sck.pin) ??
+        pads[0] ?? {
+          label: "DOUT",
+          resource: "",
+          index: 1,
+          pin: customDout.toUpperCase(),
+        })
       : {
           label: "DOUT",
           resource: "",
@@ -49,6 +54,9 @@ export function ResourceSetup({
   function selectTarget(value: string) {
     setName(value);
     setQuery(value === "custom" ? "Custom / current resource dump" : value);
+    setCustomResources("");
+    setCustomSck("");
+    setCustomDout("");
     const t = data.targets.find((t) => t.name === value);
     const clock = t?.pads.find((p) => p.resource === "SERIAL_TX") ?? t?.pads[0];
     const input =
@@ -72,10 +80,24 @@ export function ResourceSetup({
         throw Error("The FC did not report any resource assignments");
       const pins = hx711Pins(text);
       setCustomResources(text);
-      setName("custom");
-      setQuery("Custom / current resource dump");
+      if (!name) {
+        setName("custom");
+        setQuery("Custom / current resource dump");
+      }
       setCustomSck(pins.sck ?? "");
       setCustomDout(pins.dout ?? "");
+      const sckPad =
+        pads.find((p) => p.resource === "HX711_SCK" && p.pin === pins.sck) ??
+        pads.find((p) => p.pin === pins.sck);
+      const doutPad =
+        pads.find((p) => p.resource === "HX711_DOUT" && p.pin === pins.dout) ??
+        pads.find((p) => p.pin === pins.dout);
+      if (pins.sck) setSck(sckPad?.label ?? "gpio");
+      if (pins.dout) setDout(doutPad?.label ?? "gpio");
+      if (!name) {
+        if (!pins.sck) setSck("gpio");
+        if (!pins.dout) setDout("gpio");
+      }
       setDetectStatus(
         pins.sck || pins.dout
           ? `HX711 already assigned: clock ${pins.sck ?? "—"}, data ${pins.dout ?? "—"}. Writing again keeps these pins.`
@@ -117,6 +139,9 @@ export function ResourceSetup({
               setName("");
               setSck("");
               setDout("");
+              setCustomResources("");
+              setCustomSck("");
+              setCustomDout("");
             }}
             onSelect={selectTarget}
           />
@@ -138,7 +163,18 @@ export function ResourceSetup({
         </p>
       ) : (
         <>
-          {target ? (
+          {!target && (
+            <label>
+              Resource configuration
+              <textarea
+                aria-label="Resource configuration"
+                placeholder="Paste resource output or a full CLI dump"
+                value={customResources}
+                onChange={(e) => setCustomResources(e.target.value)}
+              />
+            </label>
+          )}
+          {pads.length > 0 ? (
             <div className="pad-selects">
               {[
                 ["HX711 clock (SCK)", sckKey, setSck],
@@ -184,37 +220,26 @@ export function ResourceSetup({
               ))}
             </div>
           ) : (
-            <>
+            <div className="pad-selects">
               <label>
-                Resource configuration
-                <textarea
-                  aria-label="Resource configuration"
-                  placeholder="Paste resource output or a full CLI dump"
-                  value={customResources}
-                  onChange={(e) => setCustomResources(e.target.value)}
+                Clock GPIO
+                <input
+                  aria-label="Clock GPIO"
+                  placeholder="A00"
+                  value={customSck}
+                  onChange={(e) => setCustomSck(e.target.value)}
                 />
               </label>
-              <div className="pad-selects">
-                <label>
-                  Clock GPIO
-                  <input
-                    aria-label="Clock GPIO"
-                    placeholder="A00"
-                    value={customSck}
-                    onChange={(e) => setCustomSck(e.target.value)}
-                  />
-                </label>
-                <label>
-                  Data GPIO
-                  <input
-                    aria-label="Data GPIO"
-                    placeholder="A01"
-                    value={customDout}
-                    onChange={(e) => setCustomDout(e.target.value)}
-                  />
-                </label>
-              </div>
-            </>
+              <label>
+                Data GPIO
+                <input
+                  aria-label="Data GPIO"
+                  placeholder="A01"
+                  value={customDout}
+                  onChange={(e) => setCustomDout(e.target.value)}
+                />
+              </label>
+            </div>
           )}
           <p className="subtle">
             Build with USE_HX711. Frees mapped resources on the selected GPIOs.
@@ -289,8 +314,8 @@ export function ResourceSetup({
             </>
           )}
           <p className="subtle">
-            Target mappings: {data.revision.slice(0, 8)}. Use Custom to match
-            an existing resource remap. Reboot the FC after writing or pasting
+            Target mappings: {data.revision.slice(0, 8)}. Use Custom to match an
+            existing resource remap. Reboot the FC after writing or pasting
             before the new pins are used.
           </p>
         </>

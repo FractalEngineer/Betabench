@@ -15,7 +15,10 @@ import {
   Copy,
   FlaskConical,
   Gauge,
+  Github,
   Moon,
+  PanelLeftClose,
+  PanelLeftOpen,
   Pause,
   Play,
   Plus,
@@ -90,6 +93,8 @@ export default function App() {
     "voltage",
     "power",
     "thrustG",
+    "throttle",
+    "efficiency",
   ]);
   const [loadUnit, setLoadUnit] = useState<LoadUnit>(() =>
     (localStorage.getItem("load-unit") as LoadUnit) in loadUnits
@@ -98,6 +103,9 @@ export default function App() {
   );
   const [theme, setTheme] = useState(
     () => localStorage.getItem("theme") || "dark",
+  );
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => localStorage.getItem("sidebar-collapsed") === "true",
   );
   const [mass, setMass] = useState(100);
   const controller = useRef<RunController | undefined>(undefined);
@@ -172,7 +180,14 @@ export default function App() {
               liveStart.current ??= now;
               const t = now - liveStart.current;
               setLive((previous) => {
-                const next = [...previous, { ...s, t, throttle: 0 }];
+                const next = [
+                  ...previous,
+                  {
+                    ...s,
+                    t,
+                    throttle: Math.max(0, ...manualRef.current),
+                  },
+                ];
                 const cutoff = t - LIVE_WINDOW_MS;
                 let drop = 0;
                 while (drop < next.length && next[drop].t < cutoff) drop++;
@@ -599,17 +614,46 @@ export default function App() {
 
   return (
     <div className="app-shell" data-theme={theme}>
-      <aside className="sidebar">
-        <a className="brand" href={import.meta.env.BASE_URL}>
-          <img
-            className="brand-wordmark"
-            src={`${import.meta.env.BASE_URL}brand/betabench-wordmark${theme === "light" ? "-light" : ""}.svg`}
-            alt="BetaBench"
-            width="156"
-            height="34"
-          />
-        </a>
-        <nav>
+      <aside className={`sidebar${sidebarCollapsed ? " collapsed" : ""}`}>
+        <div className="sidebar-head">
+          <a
+            className="brand"
+            href={import.meta.env.BASE_URL}
+            aria-label="BetaBench home"
+            title="BetaBench home"
+          >
+            <img
+              className="brand-wordmark"
+              src={
+                sidebarCollapsed
+                  ? `${import.meta.env.BASE_URL}brand/betabench-icon.svg`
+                  : `${import.meta.env.BASE_URL}brand/betabench-wordmark${theme === "light" ? "-light" : ""}.svg`
+              }
+              alt="BetaBench"
+              width={sidebarCollapsed ? 34 : 156}
+              height="34"
+            />
+          </a>
+          <button
+            className="sidebar-toggle icon"
+            aria-label={
+              sidebarCollapsed ? "Expand side menu" : "Collapse side menu"
+            }
+            title={sidebarCollapsed ? "Expand side menu" : "Collapse side menu"}
+            onClick={() => {
+              const next = !sidebarCollapsed;
+              setSidebarCollapsed(next);
+              localStorage.setItem("sidebar-collapsed", String(next));
+            }}
+          >
+            {sidebarCollapsed ? (
+              <PanelLeftOpen size={17} />
+            ) : (
+              <PanelLeftClose size={17} />
+            )}
+          </button>
+        </div>
+        <nav aria-label="Main navigation">
           {(
             [
               ["bench", "Test bench", <SlidersHorizontal size={17} />],
@@ -622,9 +666,11 @@ export default function App() {
               key={key}
               className={tab === key ? "nav-active" : ""}
               onClick={() => switchTab(key)}
+              aria-label={label}
+              title={sidebarCollapsed ? label : undefined}
             >
               {icon}
-              {label}
+              <span className="nav-label">{label}</span>
               {key === "history" && (
                 <span className="count">{runs.length}</span>
               )}
@@ -636,8 +682,10 @@ export default function App() {
           href="https://github.com/FractalEngineer/Betabench"
           target="_blank"
           rel="noreferrer"
+          aria-label="View BetaBench source on GitHub"
+          title="View source on GitHub"
         >
-          Source
+          <Github size={19} aria-hidden="true" />
         </a>
       </aside>
       <main>
@@ -1247,6 +1295,9 @@ export default function App() {
                       <p>Stored in this browser for this FC. Logs use grams.</p>
                     </div>
                     <button
+                      className={
+                        device?.calibration?.saved === false ? "primary" : ""
+                      }
                       disabled={!identity?.hx711 || running || fcLocked}
                       onClick={() =>
                         void action(async () => {
@@ -1311,21 +1362,15 @@ export default function App() {
                   <button
                     className={cliOpen ? "" : "primary"}
                     disabled={
-                      cliOpen
-                        ? busy
-                        : !device?.transport || running || busy
+                      cliOpen ? busy : !device?.transport || running || busy
                     }
-                    onClick={() =>
-                      cliOpen ? void closeCli() : void openCli()
-                    }
+                    onClick={() => (cliOpen ? void closeCli() : void openCli())}
                   >
                     {cliOpen ? <Power size={14} /> : <Terminal size={14} />}
                     {cliOpen ? "Close CLI" : "Open CLI"}
                   </button>
                   <button
-                    disabled={
-                      !device?.reboot || running || busy || cliOpen
-                    }
+                    disabled={!device?.reboot || running || busy || cliOpen}
                     onClick={() => void rebootFc()}
                   >
                     <RefreshCw size={14} /> Reboot FC
@@ -1399,7 +1444,10 @@ export default function App() {
                       }
                       onChange={(event) => setCliInput(event.target.value)}
                       onKeyDown={(event) => {
-                        if (event.key !== "ArrowUp" && event.key !== "ArrowDown")
+                        if (
+                          event.key !== "ArrowUp" &&
+                          event.key !== "ArrowDown"
+                        )
                           return;
                         event.preventDefault();
                         if (!cliHistory.length) return;
