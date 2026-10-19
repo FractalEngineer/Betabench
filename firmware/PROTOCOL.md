@@ -1,6 +1,6 @@
 # HX711 MSP extension — wire version 1
 
-Opt-in `USE_HX711` adds one read-only native MSPv2 command, `MSP2_SENSOR_HX711 = 0x30F0`. This is a project-local allocation and must be reviewed before any upstream proposal. Without the build define, normal MSP unsupported-command handling applies. No Betabench session, motor, tare, calibration or save commands are implemented.
+Opt-in `USE_HX711` adds one read-only native MSPv2 command, `MSP2_SENSOR_HX711 = 0x30F0`. The ID is a project-local allocation in the Betaflight-specific `0x30xx` block and can be moved during review. Without the build define, normal MSP unsupported-command handling applies. No Betabench session, motor, tare, calibration or save commands are implemented.
 
 Request payload: empty. Response: exactly 18 bytes, little endian.
 

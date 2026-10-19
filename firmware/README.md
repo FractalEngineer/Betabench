@@ -1,8 +1,8 @@
 # Optional HX711 firmware
 
-[FractalEngineer/betaflight — HX711](https://github.com/FractalEngineer/betaflight/tree/HX711) is based on upstream master `6fd72d387140746c4006805b7aae14505df36e25`. The fork's master is synchronized to that base. Configuration submodule `0b73c1f29563e390b53c7f3ea631d26d6e969cde` and board targets are unchanged.
+[FractalEngineer/betaflight — HX711](https://github.com/FractalEngineer/betaflight/tree/HX711) is based on upstream master `885f12404d4b8cb7e18d03b7847b325b4dcc725e`, with one commit on top. The fork's master is fast-forwarded to that base. Configuration submodule `0b73c1f29563e390b53c7f3ea631d26d6e969cde` and board targets are unchanged.
 
-The feature adds only HX711 acquisition, configurable GPIO resources and a read-only MSP sample. The previous Betabench session, motor watchdog, combined telemetry and firmware calibration extensions have been removed. Motors use standard Betaflight MSP. Tare, calibration and run logging belong to the web app. No upstream PR has been opened.
+The feature adds only HX711 acquisition, configurable GPIO resources and a read-only MSP sample. The previous Betabench session, motor watchdog, combined telemetry and firmware calibration extensions have been removed. Motors use standard Betaflight MSP. Tare, calibration and run logging belong to the web app. An upstream PR description is prepared; no PR has been opened yet.
 
 ## Build
 
@@ -24,7 +24,7 @@ An external toolchain can be selected with `ARM_SDK_PREFIX=/absolute/path/bin/ar
 A reproducible GPL-3.0-or-later patch and final validation record accompany this guide. Apply it to the recorded base using:
 
 ```sh
-git checkout -b HX711 6fd72d387140746c4006805b7aae14505df36e25
+git checkout -b HX711 885f12404d4b8cb7e18d03b7847b325b4dcc725e
 git am /path/to/Betabench/firmware/hx711.patch
 ```
 

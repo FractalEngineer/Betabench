@@ -42,13 +42,16 @@ Betaflight changes are limited to an opt-in `USE_HX711` raw sensor driver, persi
   - CI and deployment passed; all eight browser tests passed against the public HTTPS site. Desktop Edge exposes Web Serial in the secure page.
 - [x] Complete physical FC/ESC/HX711 validation.
   - Exercised on physical hardware with the web app and the HX711 firmware: USB/MSP connection, motor output and Stop, HX711 resource mapping, load-cell readings and browser tare/calibration all work.
+- [x] Rebase the HX711 commit onto current upstream master, fast-forward the fork's `master`, and keep the branch exactly one commit ahead.
+  - CI run 39241361607 passed host tests plus both `CLRACINGF4` builds; the exported patch reproduces tree `e82b0973e4d92ed2f5468405db3024b3a43da153`.
+- [x] Record the bench validation in the firmware docs and draft the upstream PR; the PR is not opened yet.
 - [x] Plot live telemetry continuously, reset the graph when a sequence starts, and hold the trace until the operator resumes it.
 - [x] Add per-motor manual test sliders behind the existing enable gate, released by Stop or by clearing the enable checkbox.
 - [x] Add a CLI tab that opens a real Betaflight CLI session over the MSP port (the `#` handshake Configurator uses) plus a Write to FC button for the generated resource commands.
 - [x] Read current from MSP_BATTERY_STATE byte 6; the previous byte-5 read mixed in the mAh-drawn high byte and reported a far too large current.
-  - 39 unit tests, 12 Edge browser tests and the production build passed.
+  - 41 unit tests, 13 Edge browser tests and the production build passed.
 
-No upstream Betaflight PR is authorized. The user's latest request authorizes direct web deployment to `main`; firmware stays on `HX711` for later review.
+The upstream firmware PR description is prepared and has not been opened. The branch is rebased onto current upstream master and is exactly one commit ahead; the fork's `master` tracks upstream.
 
 ## Profiles and editor
 
@@ -72,6 +75,6 @@ Tare/calibrate/save require stopped motors. Capture at least eight distinct fres
 
 ## Git and validation
 
-Upstream base: `6fd72d387140746c4006805b7aae14505df36e25`. Config submodule: `0b73c1f29563e390b53c7f3ea631d26d6e969cde`. Fork: https://github.com/FractalEngineer/betaflight. Original detached checkout, modified configuration and untracked DroneCAN content must remain untouched.
+Upstream base: `885f12404d4b8cb7e18d03b7847b325b4dcc725e`. Config submodule: `0b73c1f29563e390b53c7f3ea631d26d6e969cde`. Fork: https://github.com/FractalEngineer/betaflight. Original detached checkout, modified configuration and untracked DroneCAN content must remain untouched.
 
 Record final feature SHA, build commands/results, patch tree comparison, CI and deployment verification in firmware/VALIDATION.md. Test firmware disabled/enabled, driver GPIO/timing/freshness faults, editor boundaries/interpolation/migration, serial errors/Stop priority, calibration and storage, and browser run/abort flows. Keep physical validation unchecked until actual testing.
