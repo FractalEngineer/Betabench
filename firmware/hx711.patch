@@ -1,4 +1,4 @@
-From 35cf2fe3d7e14861ea59d6513fbb41e7e3733ddd Mon Sep 17 00:00:00 2001
+From 79e825c32c93d15734977b45c68c28b6ecb7482e Mon Sep 17 00:00:00 2001
 From: Yves <calibratedbeats@gmail.com>
 Date: Sun, 18 Oct 2026 20:23:59 +0800
 Subject: [PATCH] Add opt-in HX711 raw sensor driver, resources and MSP
@@ -6,7 +6,7 @@ Subject: [PATCH] Add opt-in HX711 raw sensor driver, resources and MSP
 
 ---
  .github/workflows/hx711.yml               | 47 ++++++++++++++
- docs/development/HX711.md                 | 44 ++++++++++++++
+ docs/development/HX711.md                 | 56 +++++++++++++++++
  mk/source.mk                              |  2 +
  src/main/cli/cli.c                        |  7 +++
  src/main/drivers/hx711.c                  | 74 +++++++++++++++++++++++
@@ -26,7 +26,7 @@ Subject: [PATCH] Add opt-in HX711 raw sensor driver, resources and MSP
  src/test/hx711/stubs/pg/hx711.h           |  6 ++
  src/test/hx711/stubs/platform.h           |  8 +++
  tools/test-hx711.sh                       |  9 +++
- 21 files changed, 367 insertions(+)
+ 21 files changed, 379 insertions(+)
  create mode 100644 .github/workflows/hx711.yml
  create mode 100644 docs/development/HX711.md
  create mode 100644 src/main/drivers/hx711.c
@@ -95,10 +95,10 @@ index 000000000..207b42758
 +          path: obj/*.hex
 diff --git a/docs/development/HX711.md b/docs/development/HX711.md
 new file mode 100644
-index 000000000..4faa7f0fd
+index 000000000..d535cc1b3
 --- /dev/null
 +++ b/docs/development/HX711.md
-@@ -0,0 +1,44 @@
+@@ -0,0 +1,56 @@
 +# HX711 MSP extension — wire version 1
 +
 +Opt-in `USE_HX711` adds one read-only native MSPv2 command, `MSP2_SENSOR_HX711 = 0x30F0`. The ID is a project-local allocation in the Betaflight-specific `0x30xx` block and can be moved during review. Without the build define, normal MSP unsupported-command handling applies. No session, motor, tare, calibration or save commands are implemented.
@@ -136,7 +136,19 @@ index 000000000..4faa7f0fd
 +
 +Build with `make CONFIG=CLRACINGF4 EXTRA_FLAGS="-DUSE_HX711"`. Without the define the feature is disabled. Use ARM GNU 13.3.Rel1. Run `bash tools/test-hx711.sh` for simulated GPIO tests.
 +
-+Persistent PG 572 stores only `sckTag` and `doutTag`. Resources `HX711_SCK` and `HX711_DOUT` start unassigned. Release existing resource owners before assigning compatible 3.3 V GPIO. On CLRACINGF4, UART4 TX/PA0 and RX/PA1 can be released and mapped to SCK/A00 and DOUT/A01. Use Save/Reboot. No target configuration is changed. Channel A/gain 128 and hardware-selected 10/80 Hz are supported.
++Persistent PG 572 stores only `sckTag` and `doutTag`. Resources `HX711_SCK` and `HX711_DOUT` start unassigned. Release existing resource owners before assigning compatible 3.3 V GPIO. No target configuration is changed. Channel A/gain 128 and hardware-selected 10/80 Hz are supported.
++
++On CLRACINGF4, with USB carrying MSP, release UART4 and move the HX711 onto its pins:
++
++```text
++resource SERIAL_TX 4 NONE
++resource SERIAL_RX 4 NONE
++resource HX711_SCK 1 A00
++resource HX711_DOUT 1 A01
++save
++```
++
++`save` persists the assignments and reboots the FC. Restore UART4 from a configuration backup once the pins are no longer used for the load cell.
 +
 +## Validation
 +
