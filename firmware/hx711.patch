@@ -1,32 +1,32 @@
-From 013a13e32cb72d4d65be13b8a28b793132b80cc2 Mon Sep 17 00:00:00 2001
+From 35cf2fe3d7e14861ea59d6513fbb41e7e3733ddd Mon Sep 17 00:00:00 2001
 From: Yves <calibratedbeats@gmail.com>
 Date: Sun, 18 Oct 2026 20:23:59 +0800
 Subject: [PATCH] Add opt-in HX711 raw sensor driver, resources and MSP
  telemetry
 
 ---
- .github/workflows/hx711.yml               | 47 ++++++++++++++++
- docs/development/HX711.md                 | 44 +++++++++++++++
+ .github/workflows/hx711.yml               | 47 ++++++++++++++
+ docs/development/HX711.md                 | 44 ++++++++++++++
  mk/source.mk                              |  2 +
  src/main/cli/cli.c                        |  7 +++
- src/main/drivers/hx711.c                  | 68 +++++++++++++++++++++++
+ src/main/drivers/hx711.c                  | 74 +++++++++++++++++++++++
  src/main/drivers/hx711.h                  | 18 ++++++
  src/main/drivers/resource.c               |  4 ++
  src/main/drivers/resource.h               |  4 ++
  src/main/fc/init.c                        |  7 +++
  src/main/fc/tasks.c                       |  6 ++
- src/main/msp/msp.c                        | 16 ++++++
+ src/main/msp/msp.c                        | 16 +++++
  src/main/msp/msp_protocol_v2_betaflight.h |  3 +
- src/main/pg/hx711.c                       | 10 ++++
- src/main/pg/hx711.h                       | 10 ++++
+ src/main/pg/hx711.c                       | 10 +++
+ src/main/pg/hx711.h                       | 10 +++
  src/main/pg/pg_ids.h                      |  1 +
- src/test/hx711/hx711_test.c               | 61 ++++++++++++++++++++
- src/test/hx711/stubs/drivers/io.h         | 16 ++++++
+ src/test/hx711/hx711_test.c               | 69 +++++++++++++++++++++
+ src/test/hx711/stubs/drivers/io.h         | 16 +++++
  src/test/hx711/stubs/drivers/time.h       |  6 ++
  src/test/hx711/stubs/pg/hx711.h           |  6 ++
  src/test/hx711/stubs/platform.h           |  8 +++
  tools/test-hx711.sh                       |  9 +++
- 21 files changed, 353 insertions(+)
+ 21 files changed, 367 insertions(+)
  create mode 100644 .github/workflows/hx711.yml
  create mode 100644 docs/development/HX711.md
  create mode 100644 src/main/drivers/hx711.c
@@ -95,7 +95,7 @@ index 000000000..207b42758
 +          path: obj/*.hex
 diff --git a/docs/development/HX711.md b/docs/development/HX711.md
 new file mode 100644
-index 000000000..cf58989d9
+index 000000000..4faa7f0fd
 --- /dev/null
 +++ b/docs/development/HX711.md
 @@ -0,0 +1,44 @@
@@ -114,7 +114,7 @@ index 000000000..cf58989d9
 +| 10 | u32 | age | milliseconds since acquisition; UINT32_MAX before first sample |
 +| 14 | u32 | time | acquisition timestamp from micros(); wraps |
 +
-+Fresh means a conversion exists and its age is at most 250 ms. Saturated means raw is -8388608 or 8388607. A saturated sample may also be fresh; clients must reject saturated values for thrust/calibration. Configured only indicates GPIO initialization succeeded, not that a load cell is producing conversions. Timestamp and sequence belong to HX711 readings, not battery measurements. Sensor RATE remains a hardware choice (10/80 samples/s).
++Fresh means a conversion exists and its age is at most 250 ms. Saturated means raw is -8388608 or 8388607. A saturated sample may also be fresh; clients must reject saturated values for thrust/calibration. Configured only indicates GPIO initialization succeeded, not that a load cell is producing conversions. A frame is only accepted once DOUT is released high after the 25th pulse, so a stuck-low data line never produces a fresh sample and the last reading simply ages out. Timestamp and sequence belong to HX711 readings, not battery measurements. Sensor RATE remains a hardware choice (10/80 samples/s).
 +
 +Example response payload:
 +
@@ -142,7 +142,7 @@ index 000000000..cf58989d9
 +
 +Bench validation is complete. An HX711 was wired to released UART4 pins on a CLRACINGF4 (SCK on TX4/PA0, DOUT on RX4/PA1), assigned with the resource commands above and exercised end to end through the web client on a physical thrust stand: pin assignment, raw counts, sign, sequence and freshness, tare, known-mass calibration and live thrust/current measurement all behave as designed, with 3.3 V logic and the module's RATE pin selecting 10 or 80 samples/s.
 +
-+Host tests in `src/test/hx711` run the production driver against simulated GPIO and time for the pin, clocking, sign, saturation, interrupt-protection, rate, sequence, freshness and timer-wrap cases. Re-check timing, noise and absolute accuracy on your own wiring and stand before trusting load-cell numbers.
++Host tests in `src/test/hx711` run the production driver against simulated GPIO and time for the pin, clocking, sign, saturation, stuck-low rejection, interrupt-protection, rate, sequence, freshness and timer-wrap cases. Re-check timing, noise and absolute accuracy on your own wiring and stand before trusting load-cell numbers.
 diff --git a/mk/source.mk b/mk/source.mk
 index 9cdf299a7..854c571ae 100644
 --- a/mk/source.mk
@@ -188,10 +188,10 @@ index ce8cffc7d..75cbb9069 100644
  #endif
 diff --git a/src/main/drivers/hx711.c b/src/main/drivers/hx711.c
 new file mode 100644
-index 000000000..fe510b807
+index 000000000..650d5dc83
 --- /dev/null
 +++ b/src/main/drivers/hx711.c
-@@ -0,0 +1,68 @@
+@@ -0,0 +1,74 @@
 +/* SPDX-License-Identifier: GPL-3.0-or-later */
 +#include "platform.h"
 +#ifdef USE_HX711
@@ -241,6 +241,12 @@ index 000000000..fe510b807
 +        IOLo(sck);
 +        __set_PRIMASK(primask);
 +        delayMicroseconds(1);
++    }
++    // DOUT is released high after the 25th pulse. A line stuck low, for example
++    // a short or a disconnected module, must not clock out zeros and be
++    // reported as a fresh sample; keep the previous reading to age out instead.
++    if (!IORead(dout)) {
++        return;
 +    }
 +    raw = (int32_t)(bits & 0x7fffff) - (int32_t)(bits & 0x800000);
 +    saturated = raw == -8388608 || raw == 8388607;
@@ -454,10 +460,10 @@ index 5854747a3..82c6ed412 100644
  #define PG_DISPLAY_PORT_FBOSD_CONFIG 566
 diff --git a/src/test/hx711/hx711_test.c b/src/test/hx711/hx711_test.c
 new file mode 100644
-index 000000000..ae09b9129
+index 000000000..a8d8c4cf1
 --- /dev/null
 +++ b/src/test/hx711/hx711_test.c
-@@ -0,0 +1,61 @@
+@@ -0,0 +1,69 @@
 +/* SPDX-License-Identifier: GPL-3.0-or-later */
 +// Executes the production driver with simulated GPIO and monotonic time.
 +#include <assert.h>
@@ -470,7 +476,7 @@ index 000000000..ae09b9129
 +uint32_t testPrimask;
 +static uint32_t now, bits;
 +static unsigned pulses, reads, owners[3];
-+static bool ready, high;
++static bool ready, high, stuckLow;
 +static hx711Config_t config = { 1, 2 };
 +uint32_t millis(void) { return now; }
 +uint32_t micros(void) { return now * 1000; }
@@ -484,6 +490,7 @@ index 000000000..ae09b9129
 +void IOLo(IO_t io) { assert(io == 1); high = false; if (pulses == 25) ready = false; }
 +bool IORead(IO_t io) {
 +    assert(io == 2);
++    if (stuckLow) return false;
 +    if (!high) return !ready;
 +    assert(reads < 24);
 +    return !!(bits & (1u << (23 - reads++)));
@@ -507,6 +514,13 @@ index 000000000..ae09b9129
 +    feed(-1); feed(-8388608); assert(sample().flags & HX711_SATURATED);
 +    feed(8388607); assert(sample().flags & HX711_SATURATED);
 +    feed(-42000); assert(!(sample().flags & HX711_SATURATED));
++    // DOUT stuck low after the read must not become a fresh zero sample.
++    const uint32_t stuckSequence = sample().sequence;
++    stuckLow = true; ready = true; pulses = reads = 0;
++    hx711Update();
++    stuckLow = false;
++    assert(pulses == 25 && reads == 0 && sample().sequence == stuckSequence);
++    assert(sample().raw == -42000);
 +    now += 250; assert(sample().flags & HX711_FRESH);
 +    now++; assert(!(sample().flags & HX711_FRESH));
 +    const uint32_t sequence = sample().sequence;
@@ -516,7 +530,7 @@ index 000000000..ae09b9129
 +    now = UINT32_MAX - 100; feed(10); now = 149; assert(sample().ageMs == 250 && (sample().flags & HX711_FRESH));
 +    now++; assert(!(sample().flags & HX711_FRESH));
 +    testPrimask = 1; feed(42); assert(testPrimask == 1);
-+    puts("PASS: HX711 readiness, 24-bit polarity, 25 pulses, IRQ protection, resources, rates and freshness/wrap");
++    puts("PASS: HX711 readiness, 24-bit polarity, 25 pulses, stuck-low reject, IRQ protection, resources, rates and freshness/wrap");
 +    return 0;
 +}
 diff --git a/src/test/hx711/stubs/drivers/io.h b/src/test/hx711/stubs/drivers/io.h

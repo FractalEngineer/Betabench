@@ -43,7 +43,7 @@ Betaflight changes are limited to an opt-in `USE_HX711` raw sensor driver, persi
 - [x] Complete physical FC/ESC/HX711 validation.
   - Exercised on physical hardware with the web app and the HX711 firmware: USB/MSP connection, motor output and Stop, HX711 resource mapping, load-cell readings and browser tare/calibration all work.
 - [x] Rebase the HX711 commit onto current upstream master, fast-forward the fork's `master`, and keep the branch exactly one commit ahead.
-  - CI run 39241361607 passed host tests plus both `CLRACINGF4` builds; the exported patch reproduces tree `e82b0973e4d92ed2f5468405db3024b3a43da153`.
+  - CI run 39247837623 passed host tests plus both `CLRACINGF4` builds; the exported patch reproduces tree `48c101236c9b7637a173f05ee3a730f45ef367af`.
 - [x] Record the bench validation in the firmware docs and draft the upstream PR; the PR is not opened yet.
 - [x] Plot live telemetry continuously, reset the graph when a sequence starts, and hold the trace until the operator resumes it.
 - [x] Add per-motor manual test sliders behind the existing enable gate, released by Stop or by clearing the enable checkbox.

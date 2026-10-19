@@ -7,13 +7,13 @@ Date: 2026-10-18, rebased and re-verified 2026-10-19 (Asia/Taipei).
 - Fork: https://github.com/FractalEngineer/betaflight
 - Branch: `HX711`, tracking `myfork/HX711`; the previous `codex/betabench` branch was removed after verification.
 - Upstream/fork master: `885f12404d4b8cb7e18d03b7847b325b4dcc725e`; the fork's `master` is fast-forwarded to it.
-- Feature HEAD: `013a13e32cb72d4d65be13b8a28b793132b80cc2`, rebased onto that master.
+- Feature HEAD: `35cf2fe3d7e14861ea59d6513fbb41e7e3733ddd`, rebased onto that master, with the stuck-low DOUT rejection and its host-test case.
 - Exactly one commit ahead and zero behind master: **Add opt-in HX711 raw sensor driver, resources and MSP telemetry**.
 - Config submodule: `0b73c1f29563e390b53c7f3ea631d26d6e969cde`; no gitlink or target-configuration changes.
 - [Compare against base](https://github.com/FractalEngineer/betaflight/compare/885f12404d4b8cb7e18d03b7847b325b4dcc725e...HX711).
 - Upstream PR description prepared; not opened yet.
 
-The complete feature diff contains only HX711 acquisition, PG/resource integration, initialization/polling, one raw MSP response, host tests, documentation and its CI matrix: 21 files, 353 added lines. It contains no motor-control/session/watchdog or calibration logic. Disabled builds exclude HX711 resource names and runtime code. The branch documentation records the bench validation of the driver.
+The complete feature diff contains only HX711 acquisition, PG/resource integration, initialization/polling, one raw MSP response, host tests, documentation and its CI matrix: 21 files, 367 added lines. It contains no motor-control/session/watchdog or calibration logic. Disabled builds exclude HX711 resource names and runtime code. The branch documentation records the bench validation of the driver.
 
 The original sibling checkout remains detached at its prior base, with its existing modified `src/config` and untracked `lib/main/dronecan/` preserved. The isolated feature worktree is clean.
 
@@ -28,21 +28,21 @@ git format-patch --stdout 885f12404d4b8cb7e18d03b7847b325b4dcc725e..HX711
 It was verified by checking out the upstream base in an isolated worktree, applying the patch with `git am`, and comparing the resulting tree against feature HEAD. Both trees are:
 
 ```text
-e82b0973e4d92ed2f5468405db3024b3a43da153
+48c101236c9b7637a173f05ee3a730f45ef367af
 ```
 
 Use `git am` to preserve the exported commit metadata in a normal clean checkout. The previous bench-extension patch and its branch have been removed.
 
 ## Firmware checks
 
-[CI run 39241361607](https://github.com/FractalEngineer/betaflight/actions/runs/39241361607) passed on the rebased feature HEAD `013a13e3`: host tests plus `CLRACINGF4` builds with the feature disabled and enabled. ARM GNU 13.3.Rel1 / GCC 13.3.1; commands are in [README.md](README.md). The memory figures below are read from that run.
+[CI run 39247837623](https://github.com/FractalEngineer/betaflight/actions/runs/39247837623) passed on the rebased feature HEAD `35cf2fe3`: host tests plus `CLRACINGF4` builds with the feature disabled and enabled. ARM GNU 13.3.Rel1 / GCC 13.3.1; commands are in [README.md](README.md). The memory figures below are read from that run.
 
 | CLRACINGF4 variant | FLASH1 bytes / 992 KiB | RAM bytes / 128 KiB | CCM bytes / 64 KiB |
 | ------------------ | ---------------------: | ------------------: | -----------------: |
 | Feature disabled   |                 545309 |               87472 |              13360 |
 | USE_HX711          |                 546049 |               87520 |              13360 |
 
-HEX artifacts are attached to the CI run. Host tests execute the production driver with simulated GPIO/time: unassigned/identical/occupied resources, no clocks while not ready, exactly 25 pulses and 24 data reads, sign extension and saturation, protected high pulses/restored interrupt mask, 10/80 Hz sample feeds, sequence, freshness and timer wrap. `git diff --check` passed.
+HEX artifacts are attached to the CI run. Host tests execute the production driver with simulated GPIO/time: unassigned/identical/occupied resources, no clocks while not ready, exactly 25 pulses and 24 data reads, sign extension and saturation, a stuck-low DOUT rejecting the frame, protected high pulses/restored interrupt mask, 10/80 Hz sample feeds, sequence, freshness and timer wrap. `git diff --check` passed.
 
 ## Web checks
 
